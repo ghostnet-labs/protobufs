@@ -51,6 +51,31 @@ message SystemResources {
   float cpu_temp_celsius = 8;
 }
 
+// BatteryStatus reports the node's battery monitor, such as the INA219 on a
+// UPS module, as exposed by the kernel hwmon subsystem.
+message BatteryStatus {
+  // Whether a battery monitor was found. All other fields are zero when false.
+  bool present = 1;
+
+  // Battery (bus) voltage in volts.
+  float voltage_volts = 2;
+
+  // Current through the monitor's shunt in amps. The sign follows the
+  // monitor's wiring, so it is not a reliable charge/discharge indicator.
+  float current_amps = 3;
+
+  // Power in watts as reported by the monitor.
+  float power_watts = 4;
+
+  // Estimated state of charge (0–100) from the Li-ion voltage curve.
+  // Negative when it cannot be estimated.
+  float charge_percent = 5;
+
+  // Number of series Li-ion cells inferred from the voltage, used for the
+  // charge estimate. Zero when unknown.
+  uint32 cell_count = 6;
+}
+
 // NetworkInterfaceState indicates the connectivity state of a network entry.
 enum NetworkInterfaceState {
   NETWORK_INTERFACE_STATE_UNSPECIFIED = 0;
@@ -131,6 +156,9 @@ message GetDashboardStatusResponse {
 
   // Status of monitored system services.
   repeated ServiceInfo active_services = 4;
+
+  // Battery monitor readings, when the device has one.
+  BatteryStatus battery = 5;
 }
 
 // ExecuteQuickActionRequest identifies the action to perform.
