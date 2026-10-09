@@ -1,0 +1,142 @@
+syntax = "proto3";
+
+package openmanet.hardware.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "openmanet/hardware/v1/hardware.proto";
+
+// HardwareService exposes V1 carrier hardware telemetry (battery monitor,
+// fault inputs, watchdog), per-radio power state machines and the bounded
+// fault-recovery ladder.
+//
+// Every RPC requires a session (the auth middleware does not exempt them).
+// Control RPCs are additionally refused with FAILED_PRECONDITION while the
+// daemon is in CONTROL_MODE_TELEMETRY_ONLY, which is the default until the
+// V1 GPIO mapping is verified on hardware. Control RPCs never set a GPIO
+// directly: they record a request that the radio state machine acts on.
+service HardwareService {
+  // GetHardwareStatus returns the current hardware manager view.
+  rpc GetHardwareStatus(google.protobuf.Empty) returns (GetHardwareStatusResponse);
+
+  // StreamHardwareStatus sends the current status immediately, then again
+  // whenever it changes, at most once per second.
+  rpc StreamHardwareStatus(StreamHardwareStatusRequest) returns (stream StreamHardwareStatusResponse);
+
+  // SetRadioPower requests a radio rail on or off through its state machine.
+  // A request to power on a RADIO_STATE_FAILED radio is refused; use
+  // ExecuteRadioRecovery.
+  rpc SetRadioPower(SetRadioPowerRequest) returns (SetRadioPowerResponse);
+
+  // SetRadioRfDisable asserts or releases the hardware RF disable line.
+  // Only Wi-Fi has one (WIFI_WDIS1_N, low = RF off).
+  rpc SetRadioRfDisable(SetRadioRfDisableRequest) returns (SetRadioRfDisableResponse);
+
+  // ExecuteRadioRecovery runs the recovery ladder from step 1 now, or clears
+  // RADIO_STATE_FAILED and powers the radio on again.
+  rpc ExecuteRadioRecovery(ExecuteRadioRecoveryRequest) returns (ExecuteRadioRecoveryResponse);
+
+  // ListRecoveryEvents returns the newest entries of the bounded recovery
+  // event ring, newest first.
+  rpc ListRecoveryEvents(ListRecoveryEventsRequest) returns (ListRecoveryEventsResponse);
+
+  // ExecuteGnssReset pulses GNSS_RESET_N low for 100 ms. The PPS line and
+  // GNSS UART are never touched.
+  rpc ExecuteGnssReset(ExecuteGnssResetRequest) returns (ExecuteGnssResetResponse);
+}
+
+// GetHardwareStatusResponse carries the hardware status.
+message GetHardwareStatusResponse {
+  // status is the current hardware manager view.
+  HardwareStatus status = 1;
+}
+
+// StreamHardwareStatusRequest is reserved for future stream options.
+message StreamHardwareStatusRequest {}
+
+// StreamHardwareStatusResponse carries one status update.
+message StreamHardwareStatusResponse {
+  // status is the hardware manager view at the time of the update.
+  HardwareStatus status = 1;
+}
+
+// SetRadioPowerRequest selects a radio and its requested power.
+message SetRadioPowerRequest {
+  // radio is the radio to switch.
+  Radio radio = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // enabled requests the rail on (true) or off (false).
+  bool enabled = 2;
+}
+
+// SetRadioPowerResponse returns the radio status after the request was
+// recorded. The transition itself happens on the state machine's next step.
+message SetRadioPowerResponse {
+  // radio is the radio's status.
+  RadioStatus radio = 1;
+}
+
+// SetRadioRfDisableRequest selects a radio and the RF disable state.
+message SetRadioRfDisableRequest {
+  // radio must be RADIO_WIFI; HaLow has no RF disable line.
+  Radio radio = 1 [(buf.validate.field).enum = {
+    in: [2]
+  }];
+
+  // disabled asserts the RF disable (true) or releases it (false).
+  bool disabled = 2;
+}
+
+// SetRadioRfDisableResponse returns the radio status after the request was
+// recorded.
+message SetRadioRfDisableResponse {
+  // radio is the radio's status.
+  RadioStatus radio = 1;
+}
+
+// ExecuteRadioRecoveryRequest selects the radio to recover.
+message ExecuteRadioRecoveryRequest {
+  // radio is the radio to recover.
+  Radio radio = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+// ExecuteRadioRecoveryResponse returns the radio status after the request
+// was recorded.
+message ExecuteRadioRecoveryResponse {
+  // radio is the radio's status.
+  RadioStatus radio = 1;
+}
+
+// ListRecoveryEventsRequest filters the event ring.
+message ListRecoveryEventsRequest {
+  // limit is the maximum number of events to return, 1 to 64. Zero returns
+  // the whole ring.
+  uint32 limit = 1 [(buf.validate.field).uint32.lte = 64];
+
+  // radio keeps only events for this radio when set. Unspecified returns
+  // every event, including node-level ones.
+  Radio radio = 2 [(buf.validate.field).enum.defined_only = true];
+}
+
+// ListRecoveryEventsResponse carries the selected events, newest first.
+message ListRecoveryEventsResponse {
+  // events are the selected events, newest first.
+  repeated RecoveryEvent events = 1;
+}
+
+// ExecuteGnssResetRequest is reserved for future reset options.
+message ExecuteGnssResetRequest {}
+
+// ExecuteGnssResetResponse confirms the reset request.
+message ExecuteGnssResetResponse {
+  // requested_at is when the reset was queued; the pulse runs on the hardware
+  // manager's next step and is recorded as a RECOVERY_STEP_GNSS_RESET event.
+  google.protobuf.Timestamp requested_at = 1;
+}
