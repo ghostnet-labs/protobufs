@@ -1,0 +1,509 @@
+syntax = "proto3";
+
+package openmanet.hardware.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Radio identifies one switchable mesh radio on the V1 carrier. GNSS has no
+// power switch on V1 and is controlled only through ExecuteGnssReset.
+enum Radio {
+  // RADIO_UNSPECIFIED is the zero value. In a RecoveryEvent it marks a
+  // node-level event (host reset request, GNSS reset) that has no radio.
+  RADIO_UNSPECIFIED = 0;
+
+  // RADIO_HALOW is the 802.11ah radio (Gateworks GW16170) on the USB hub.
+  RADIO_HALOW = 1;
+
+  // RADIO_WIFI is the 802.11ax radio (AsiaRF AW7916-AED) on PCIe.
+  RADIO_WIFI = 2;
+}
+
+// RadioState is the per-radio power state machine state.
+enum RadioState {
+  // RADIO_STATE_UNSPECIFIED is the zero value and is never reported.
+  RADIO_STATE_UNSPECIFIED = 0;
+
+  // RADIO_STATE_UNMANAGED means the daemon observes the radio but does not
+  // control it: actuation is disabled, the board was not detected, the
+  // boot-loop guard tripped, or the radio's bus identity is not configured.
+  // device_present and netdev_present are still reported.
+  RADIO_STATE_UNMANAGED = 1;
+
+  // RADIO_STATE_OFF means the rail is off by request (user, low battery).
+  RADIO_STATE_OFF = 2;
+
+  // RADIO_STATE_POWERING means the enable is high and the rail is settling.
+  RADIO_STATE_POWERING = 3;
+
+  // RADIO_STATE_ENUMERATING means the daemon is waiting for the bus device
+  // and its network interface to appear.
+  RADIO_STATE_ENUMERATING = 4;
+
+  // RADIO_STATE_UP means the interface is present and health checks pass.
+  RADIO_STATE_UP = 5;
+
+  // RADIO_STATE_FAULT means the recovery ladder is running.
+  RADIO_STATE_FAULT = 6;
+
+  // RADIO_STATE_COOLDOWN means the rail is off, waiting for the power-cycle
+  // backoff before the next power-on.
+  RADIO_STATE_COOLDOWN = 7;
+
+  // RADIO_STATE_FAILED means the ladder is exhausted and the radio is left
+  // off until ExecuteRadioRecovery or a reboot.
+  RADIO_STATE_FAILED = 8;
+}
+
+// StateReason explains why a radio entered its current state, and is also
+// the trigger recorded on a RecoveryEvent.
+enum StateReason {
+  // STATE_REASON_UNSPECIFIED is the zero value.
+  STATE_REASON_UNSPECIFIED = 0;
+
+  // STATE_REASON_NONE means no particular cause (normal progress).
+  STATE_REASON_NONE = 1;
+
+  // STATE_REASON_USER means an operator request through SetRadioPower.
+  STATE_REASON_USER = 2;
+
+  // STATE_REASON_LOW_BATTERY means the battery policy turned the radio off.
+  STATE_REASON_LOW_BATTERY = 3;
+
+  // STATE_REASON_ENUMERATION_TIMEOUT means the bus device or netdev did not
+  // appear within its timeout.
+  STATE_REASON_ENUMERATION_TIMEOUT = 4;
+
+  // STATE_REASON_HEALTH_CHECK means the device or netdev disappeared while
+  // the rail was on for longer than the health grace period.
+  STATE_REASON_HEALTH_CHECK = 5;
+
+  // STATE_REASON_FAULT_LINE means a hardware fault input asserted.
+  STATE_REASON_FAULT_LINE = 6;
+
+  // STATE_REASON_POWER means EFUSE_FAULT asserted or POWER_GOOD dropped.
+  // This is a node power fault, not a radio fault; no power-cycling
+  // happens until POWER_GOOD has been back for 5 s.
+  STATE_REASON_POWER = 7;
+
+  // STATE_REASON_MANUAL_RECOVERY means an operator ran ExecuteRadioRecovery.
+  STATE_REASON_MANUAL_RECOVERY = 8;
+
+  // STATE_REASON_LADDER_EXHAUSTED means every recovery step was used up.
+  STATE_REASON_LADDER_EXHAUSTED = 9;
+
+  // STATE_REASON_STARTUP means the state was adopted from the hardware when
+  // the daemon started.
+  STATE_REASON_STARTUP = 10;
+
+  // STATE_REASON_CONTROL_DISABLED accompanies RADIO_STATE_UNMANAGED.
+  STATE_REASON_CONTROL_DISABLED = 11;
+}
+
+// ControlMode says whether the daemon may drive any hardware line.
+enum ControlMode {
+  // CONTROL_MODE_UNSPECIFIED is the zero value and is never reported.
+  CONTROL_MODE_UNSPECIFIED = 0;
+
+  // CONTROL_MODE_TELEMETRY_ONLY means the daemon reads telemetry and drives
+  // nothing. Control RPCs fail with FAILED_PRECONDITION.
+  CONTROL_MODE_TELEMETRY_ONLY = 1;
+
+  // CONTROL_MODE_ACTIVE means the radio state machines and recovery ladder
+  // are driving GPIO and bus controls.
+  CONTROL_MODE_ACTIVE = 2;
+}
+
+// ControlModeReason explains the control mode.
+enum ControlModeReason {
+  // CONTROL_MODE_REASON_UNSPECIFIED is the zero value.
+  CONTROL_MODE_REASON_UNSPECIFIED = 0;
+
+  // CONTROL_MODE_REASON_NONE accompanies CONTROL_MODE_ACTIVE.
+  CONTROL_MODE_REASON_NONE = 1;
+
+  // CONTROL_MODE_REASON_ACTUATION_DISABLED means hardware.actuationEnable is
+  // false in the daemon config (the default until the V1 pin mapping is
+  // verified on hardware).
+  CONTROL_MODE_REASON_ACTUATION_DISABLED = 2;
+
+  // CONTROL_MODE_REASON_BOARD_NOT_DETECTED means the board is not a V1
+  // carrier (board.json model.id is not "ghostnet,v1").
+  CONTROL_MODE_REASON_BOARD_NOT_DETECTED = 3;
+
+  // CONTROL_MODE_REASON_LINES_UNRESOLVED means a required GPIO line name was
+  // not found in the device tree, or a line request failed.
+  CONTROL_MODE_REASON_LINES_UNRESOLVED = 4;
+
+  // CONTROL_MODE_REASON_BOOT_LOOP_GUARD means three or more recovery-caused
+  // resets happened within one hour, so this boot is telemetry-only.
+  CONTROL_MODE_REASON_BOOT_LOOP_GUARD = 5;
+}
+
+// RecoveryStep is one rung of the fault-recovery ladder, or another audited
+// hardware action.
+enum RecoveryStep {
+  // RECOVERY_STEP_UNSPECIFIED is the zero value.
+  RECOVERY_STEP_UNSPECIFIED = 0;
+
+  // RECOVERY_STEP_RESET_USB_DEVICE is ladder step 1 for HaLow: USB device
+  // reset, then driver unbind and bind.
+  RECOVERY_STEP_RESET_USB_DEVICE = 1;
+
+  // RECOVERY_STEP_RESET_PCIE_FUNCTION is ladder step 1 for Wi-Fi: PCI
+  // function reset, then remove and rescan.
+  RECOVERY_STEP_RESET_PCIE_FUNCTION = 2;
+
+  // RECOVERY_STEP_RESET_HUB is ladder step 2 (HaLow only): pulse
+  // USB_HUB_RESET_N. Also drops the OpenVLM audio device.
+  RECOVERY_STEP_RESET_HUB = 3;
+
+  // RECOVERY_STEP_POWER_CYCLE is ladder step 3: rail off, cooldown, power on.
+  RECOVERY_STEP_POWER_CYCLE = 4;
+
+  // RECOVERY_STEP_HOST_RESET is ladder step 4: the daemon stops petting the
+  // supervisor watchdog so the node resets.
+  RECOVERY_STEP_HOST_RESET = 5;
+
+  // RECOVERY_STEP_GNSS_RESET records a manual GNSS_RESET_N pulse.
+  RECOVERY_STEP_GNSS_RESET = 6;
+
+  // RECOVERY_STEP_POWER_OFF records a radio rail switched off by request.
+  RECOVERY_STEP_POWER_OFF = 7;
+
+  // RECOVERY_STEP_SHUTDOWN records a low-battery graceful shutdown.
+  RECOVERY_STEP_SHUTDOWN = 8;
+}
+
+// RecoveryResult is the outcome of one recorded action.
+enum RecoveryResult {
+  // RECOVERY_RESULT_UNSPECIFIED is the zero value.
+  RECOVERY_RESULT_UNSPECIFIED = 0;
+
+  // RECOVERY_RESULT_SUCCEEDED means the action was carried out. Whether the
+  // radio came back is visible in its state afterwards.
+  RECOVERY_RESULT_SUCCEEDED = 1;
+
+  // RECOVERY_RESULT_FAILED means the action returned an error (see detail).
+  RECOVERY_RESULT_FAILED = 2;
+
+  // RECOVERY_RESULT_SKIPPED means a precondition blocked the action (rate
+  // limit, active PTT transmit, policy disabled); the ladder moved on.
+  RECOVERY_RESULT_SKIPPED = 3;
+
+  // RECOVERY_RESULT_EXHAUSTED means the ladder ran out and the radio is now
+  // RADIO_STATE_FAILED.
+  RECOVERY_RESULT_EXHAUSTED = 4;
+}
+
+// FaultLine names one hardware status input.
+enum FaultLine {
+  // FAULT_LINE_UNSPECIFIED is the zero value.
+  FAULT_LINE_UNSPECIFIED = 0;
+
+  // FAULT_LINE_HALOW_FAULT is HALOW_FAULT_N (GPIO6). Source unselected on V1.
+  FAULT_LINE_HALOW_FAULT = 1;
+
+  // FAULT_LINE_WIFI_FAULT is WIFI_FAULT_N (GPIO7). Source unselected on V1.
+  FAULT_LINE_WIFI_FAULT = 2;
+
+  // FAULT_LINE_POWER_GOOD is POWER_GOOD (GPIO12). Asserted means the eFuse
+  // reports power NOT good.
+  FAULT_LINE_POWER_GOOD = 3;
+
+  // FAULT_LINE_EFUSE_FAULT is EFUSE_FAULT (GPIO13), TPS26633 FLT, active low.
+  FAULT_LINE_EFUSE_FAULT = 4;
+
+  // FAULT_LINE_HALOW_USB_FAULT is HALOW_USB_FAULT_N (GPIO24), hub-port
+  // overcurrent for the HaLow radio.
+  FAULT_LINE_HALOW_USB_FAULT = 5;
+
+  // FAULT_LINE_VLM_USB_FAULT is VLM_USB_FAULT_N (GPIO25), OpenVLM port
+  // overcurrent.
+  FAULT_LINE_VLM_USB_FAULT = 6;
+
+  // FAULT_LINE_INA228_ALERT is INA228_ALERT_N (GPIO20), the battery monitor's
+  // hardware alert.
+  FAULT_LINE_INA228_ALERT = 7;
+
+  // FAULT_LINE_SUPERVISOR_WDO is SUPERVISOR_WDO (GPIO11), the TPS386000
+  // watchdog output. Logged only.
+  FAULT_LINE_SUPERVISOR_WDO = 8;
+}
+
+// LineState is the observed state of a fault input.
+enum LineState {
+  // LINE_STATE_UNSPECIFIED is the zero value.
+  LINE_STATE_UNSPECIFIED = 0;
+
+  // LINE_STATE_UNAVAILABLE means the input is not requested (source not
+  // selected, not listed in hardware.faultInputs, or the board was not
+  // detected). An unavailable line is neither healthy nor faulted.
+  LINE_STATE_UNAVAILABLE = 1;
+
+  // LINE_STATE_NORMAL means the input is read and reports no fault.
+  LINE_STATE_NORMAL = 2;
+
+  // LINE_STATE_ASSERTED means the input is read and reports a fault.
+  LINE_STATE_ASSERTED = 3;
+}
+
+// BatteryLevel is the low-battery policy level for the V1 3S pack.
+enum BatteryLevel {
+  // BATTERY_LEVEL_UNSPECIFIED is the zero value.
+  BATTERY_LEVEL_UNSPECIFIED = 0;
+
+  // BATTERY_LEVEL_UNKNOWN means no fresh reading, or the board's pack is not
+  // the documented V1 3S pack, so no thresholds apply.
+  BATTERY_LEVEL_UNKNOWN = 1;
+
+  // BATTERY_LEVEL_NORMAL means above the warning threshold.
+  BATTERY_LEVEL_NORMAL = 2;
+
+  // BATTERY_LEVEL_WARNING means compensated pack voltage below 10.5 V for
+  // 30 s.
+  BATTERY_LEVEL_WARNING = 3;
+
+  // BATTERY_LEVEL_CRITICAL means below 9.9 V for 30 s; Wi-Fi is turned off.
+  BATTERY_LEVEL_CRITICAL = 4;
+
+  // BATTERY_LEVEL_SHUTDOWN means below 9.6 V for 30 s; a graceful shutdown
+  // is pending (performed only when hardware.batteryShutdownEnable is true).
+  BATTERY_LEVEL_SHUTDOWN = 5;
+}
+
+// BatteryAbsentReason explains why present is false.
+enum BatteryAbsentReason {
+  // BATTERY_ABSENT_REASON_UNSPECIFIED is the zero value.
+  BATTERY_ABSENT_REASON_UNSPECIFIED = 0;
+
+  // BATTERY_ABSENT_REASON_NONE accompanies present = true.
+  BATTERY_ABSENT_REASON_NONE = 1;
+
+  // BATTERY_ABSENT_REASON_NO_MONITOR means no INA2xx hwmon device exists.
+  BATTERY_ABSENT_REASON_NO_MONITOR = 2;
+
+  // BATTERY_ABSENT_REASON_MONITOR_UNREACHABLE means the monitor exists but
+  // no successful reading for more than 30 s (or never).
+  BATTERY_ABSENT_REASON_MONITOR_UNREACHABLE = 3;
+}
+
+// BatteryTelemetry is the INA228 battery-monitor block. The shunt sits after
+// the eFuse and charger output, so these values measure system load, not
+// battery current; while charging, current_ma is the node's draw.
+message BatteryTelemetry {
+  // present is true while a reading no older than 30 s exists.
+  bool present = 1;
+
+  // absent_reason explains present = false.
+  BatteryAbsentReason absent_reason = 2;
+
+  // stale is true when the newest reading is older than 5 s. Values are
+  // kept (last good) while stale.
+  bool stale = 3;
+
+  // sampled_at is when the values below were read. Unset when never read.
+  google.protobuf.Timestamp sampled_at = 4;
+
+  // bus_voltage_mv is the bus voltage in millivolts (hwmon in1_input).
+  int32 bus_voltage_mv = 5;
+
+  // current_ma is the system current in milliamps (hwmon curr1_input).
+  // Positive is draw from the pack.
+  int32 current_ma = 6;
+
+  // power_mw is the system power in milliwatts (hwmon power1_input / 1000).
+  int32 power_mw = 7;
+
+  // energy_mwh is the energy counted by the INA228 since its own power-up,
+  // in milliwatt-hours (hwmon energy1_input). Unset when the driver lacks it.
+  optional double energy_mwh = 8;
+
+  // charge_mah is the charge drawn since the daemon started, in
+  // milliamp-hours, integrated from current_ma. It is a coulomb count of
+  // system draw, not battery state of charge, and is wrong while charging.
+  double charge_mah = 9;
+
+  // monitor_temp_c is the INA228 die temperature in degrees Celsius (hwmon
+  // temp1_input). Unset when the driver lacks it.
+  optional double monitor_temp_c = 10;
+
+  // alarms is a bitmask of hwmon alarm flags: bit 0 in1_min_alarm (bus
+  // undervoltage), bit 1 in0_max_alarm (shunt overvoltage), bit 2
+  // power1_max_alarm, bit 3 temp1_max_alarm.
+  uint32 alarms = 11;
+
+  // compensated_voltage_mv is V_bus + I x R_pack in millivolts, the value
+  // compared with the low-battery thresholds.
+  int32 compensated_voltage_mv = 12;
+
+  // level is the low-battery policy level (with 30 s entry and 60 s / 0.2 V
+  // hysteresis on exit).
+  BatteryLevel level = 13;
+
+  // series_cells is the pack's series cell count when known (3 on V1), else 0.
+  uint32 series_cells = 14;
+}
+
+// FaultLineStatus reports one hardware status input.
+message FaultLineStatus {
+  // line identifies the input.
+  FaultLine line = 1;
+
+  // name is the device-tree GPIO line name, e.g. "POWER_GOOD".
+  string name = 2;
+
+  // state is the observed state.
+  LineState state = 3;
+
+  // edges_total counts edges seen on this input since the daemon started.
+  uint64 edges_total = 4;
+
+  // last_change_at is when state last changed. Unset when it never changed.
+  google.protobuf.Timestamp last_change_at = 5;
+}
+
+// RadioStatus reports one radio's state machine and recovery counters.
+message RadioStatus {
+  // radio identifies the radio.
+  Radio radio = 1;
+
+  // state is the current state machine state.
+  RadioState state = 2;
+
+  // reason explains why the radio entered state.
+  StateReason reason = 3;
+
+  // state_since is when the radio entered state.
+  google.protobuf.Timestamp state_since = 4;
+
+  // power_requested is the operator's requested power (SetRadioPower). The
+  // battery policy may still hold the radio off.
+  bool power_requested = 5;
+
+  // rf_disabled is true while the hardware RF disable is asserted (Wi-Fi
+  // WIFI_WDIS1_N low). Always false for HaLow.
+  bool rf_disabled = 6;
+
+  // device_present is true when the radio's bus device (USB or PCI) exists.
+  bool device_present = 7;
+
+  // netdev_present is true when the radio's network interface exists.
+  bool netdev_present = 8;
+
+  // netdev is the configured network interface name, empty when unset.
+  string netdev = 9;
+
+  // current_step is the next ladder step the radio will try while in
+  // RADIO_STATE_FAULT, else unspecified.
+  RecoveryStep current_step = 10;
+
+  // step_attempt is the number of attempts already made at current_step.
+  uint32 step_attempt = 11;
+
+  // next_action_at is when the state machine will next act on its own
+  // (timer expiry). Unset when it is waiting on nothing.
+  google.protobuf.Timestamp next_action_at = 12;
+
+  // recoveries_total counts ladder steps run since the daemon started.
+  uint64 recoveries_total = 13;
+
+  // power_cycles_total counts ladder power cycles since the daemon started.
+  uint64 power_cycles_total = 14;
+
+  // failed_total counts entries into RADIO_STATE_FAILED since the daemon
+  // started.
+  uint64 failed_total = 15;
+}
+
+// WatchdogStatus reports the supervisor watchdog service.
+message WatchdogStatus {
+  // enabled is hardware.watchdogEnable from the daemon config.
+  bool enabled = 1;
+
+  // armed is true while the daemon holds the gpio-wdt device open and pets
+  // it.
+  bool armed = 2;
+
+  // device is the watchdog character device in use, e.g. "/dev/watchdog1".
+  string device = 3;
+
+  // pets_total counts heartbeats written since the daemon started.
+  uint64 pets_total = 4;
+
+  // last_pet_at is when the last heartbeat was written.
+  google.protobuf.Timestamp last_pet_at = 5;
+
+  // host_reset_requested is true once the daemon stopped petting to request
+  // a host reset (ladder step 4).
+  bool host_reset_requested = 6;
+}
+
+// HardwareStatus is the full hardware manager view.
+message HardwareStatus {
+  // generated_at is when this status was assembled.
+  google.protobuf.Timestamp generated_at = 1;
+
+  // board_detected is true when board.json identifies a V1 carrier.
+  bool board_detected = 2;
+
+  // control_mode says whether the daemon drives any hardware line.
+  ControlMode control_mode = 3;
+
+  // control_mode_reason explains control_mode.
+  ControlModeReason control_mode_reason = 4;
+
+  // radios has one entry per switchable radio, HaLow first.
+  repeated RadioStatus radios = 5;
+
+  // fault_lines has one entry per hardware status input, including
+  // unavailable ones.
+  repeated FaultLineStatus fault_lines = 6;
+
+  // power_fault is true while EFUSE_FAULT is asserted or POWER_GOOD is low,
+  // or until POWER_GOOD has been back for 5 s.
+  bool power_fault = 7;
+
+  // battery is the battery-monitor block.
+  BatteryTelemetry battery = 8;
+
+  // watchdog is the supervisor watchdog service.
+  WatchdogStatus watchdog = 9;
+
+  // recovery_boots_last_hour counts recovery-caused resets recorded in the
+  // last hour; three or more puts the boot in telemetry-only mode.
+  uint32 recovery_boots_last_hour = 10;
+
+  // shutdown_pending is true once a low-battery graceful shutdown started.
+  bool shutdown_pending = 11;
+}
+
+// RecoveryEvent is one entry of the bounded (64-entry) recovery event ring.
+message RecoveryEvent {
+  // occurred_at is when the action started.
+  google.protobuf.Timestamp occurred_at = 1;
+
+  // radio is the radio acted on; unspecified for node-level actions.
+  Radio radio = 2;
+
+  // step is the action taken.
+  RecoveryStep step = 3;
+
+  // attempt is the 1-based attempt number at this step for this incident.
+  uint32 attempt = 4;
+
+  // trigger is why the action ran.
+  StateReason trigger = 5;
+
+  // result is the outcome.
+  RecoveryResult result = 6;
+
+  // duration_ms is how long the action took, in milliseconds.
+  uint32 duration_ms = 7;
+
+  // detail is a short human-readable note (error text or skip cause).
+  string detail = 8;
+
+  // caller is the authenticated user for operator-initiated actions, empty
+  // for automatic ones.
+  string caller = 9;
+}
