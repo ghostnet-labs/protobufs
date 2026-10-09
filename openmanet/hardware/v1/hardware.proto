@@ -225,9 +225,10 @@ enum FaultLine {
   // hardware alert.
   FAULT_LINE_INA228_ALERT = 7;
 
-  // FAULT_LINE_SUPERVISOR_WDO is SUPERVISOR_WDO (GPIO11), the TPS386000
-  // watchdog output. Logged only.
-  FAULT_LINE_SUPERVISOR_WDO = 8;
+  // FAULT_LINE_SUPERVISOR_WDO was SUPERVISOR_WDO (GPIO11), the TPS386000
+  // watchdog output. Retired by D-044/R-23: GPIO11 is now the SUPERVISOR_ARM
+  // output, so openmanetd never emits this value. Kept for wire compatibility.
+  FAULT_LINE_SUPERVISOR_WDO = 8 [deprecated = true];
 }
 
 // LineState is the observed state of a fault input.
