@@ -21,3 +21,7 @@ jobs:
           # setup_only: true
           # Include a GitHub token to ensure API requests aren't rate limited.
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          # Publishing and archiving on the BSR need BUF_TOKEN. Without it, run
+          # lint, format, build and breaking checks only instead of failing main.
+          push: ${{ github.event_name == 'push' && secrets.BUF_TOKEN != '' }}
+          archive: ${{ github.event_name == 'delete' && secrets.BUF_TOKEN != '' }}
