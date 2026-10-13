@@ -10,13 +10,16 @@ permissions:
   pull-requests: write
 jobs:
   buf:
-    runs-on: ubuntu-latest
+    # Same-repo PRs run on the Mac Studio runners without BUF_TOKEN; pushes,
+    # branch deletes and fork PRs stay on hosted runners, so the registry
+    # token never reaches the self-hosted machine.
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && fromJSON('["self-hosted","Linux","ARM64"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: bufbuild/buf-action@v1
         with:
           # Publishing schema changes to the BSR requires a BSR authentication token.
-          token: ${{ secrets.BUF_TOKEN }}
+          token: ${{ github.event_name != 'pull_request' && secrets.BUF_TOKEN || '' }}
           # Include this line if you only want to set up the Action and do nothing else.
           # setup_only: true
           # Include a GitHub token to ensure API requests aren't rate limited.
