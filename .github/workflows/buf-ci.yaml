@@ -8,12 +8,17 @@ on:
 permissions:
   contents: read
   pull-requests: write
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   buf:
     # Same-repo PRs run on the Mac Studio runners without BUF_TOKEN; pushes,
     # branch deletes and fork PRs stay on hosted runners, so the registry
     # token never reaches the self-hosted machine.
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && fromJSON('["self-hosted","Linux","ARM64"]') || 'ubuntu-latest' }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: bufbuild/buf-action@v1
