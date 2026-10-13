@@ -10,7 +10,9 @@ permissions:
   pull-requests: write
 jobs:
   buf:
-    runs-on: [self-hosted, Linux, ARM64]
+    # Pushes, branch deletes and same-repo PRs use the Mac Studio runners;
+    # fork PRs stay on hosted runners so outside code never runs there.
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","Linux","ARM64"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: bufbuild/buf-action@v1
