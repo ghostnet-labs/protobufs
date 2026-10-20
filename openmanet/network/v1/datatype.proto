@@ -32,4 +32,11 @@ enum DataType {
      hears them on a non-vxlan interface.
   */
   DATA_TYPE_MESH_NEIGHBORS = 103;
+
+  /*
+     Channel migration data type. Each node republishes a bundle of its
+     latest channel-migration messages (signed plans, acks, adverts).
+     Payload: openmanetd internal/chanmig/platform bundle, record version 1.
+  */
+  DATA_TYPE_CHANNEL_MIGRATION = 104;
 }
