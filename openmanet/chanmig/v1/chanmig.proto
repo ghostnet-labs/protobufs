@@ -1,0 +1,325 @@
+syntax = "proto3";
+
+package openmanet.chanmig.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "openmanet/radio/v1/radio.proto";
+
+// MigrationPhase is the node-level channel-migration state.
+enum MigrationPhase {
+  // MIGRATION_PHASE_UNSPECIFIED is the zero value. It is reported only
+  // when channel migration is disabled.
+  MIGRATION_PHASE_UNSPECIFIED = 0;
+
+  // MIGRATION_PHASE_BOOTING means the node has just started and is
+  // listening on its last-known plan for the cold-boot grace period before
+  // it starts rediscovery.
+  MIGRATION_PHASE_BOOTING = 1;
+
+  // MIGRATION_PHASE_STABLE means every band sits on its plan assignment
+  // and no switch is scheduled.
+  MIGRATION_PHASE_STABLE = 2;
+
+  // MIGRATION_PHASE_PENDING means a plan was accepted and at least one band
+  // has a switch scheduled (see BandStatus.switch_at) that has not run yet.
+  MIGRATION_PHASE_PENDING = 3;
+
+  // MIGRATION_PHASE_MIGRATING means at least one band has switched and is
+  // verifying its new assignment or falling back to its previous one.
+  MIGRATION_PHASE_MIGRATING = 4;
+
+  // MIGRATION_PHASE_SEARCHING means the node heard no peer for the
+  // peer-loss timeout and every radio is sweeping its search list to
+  // rediscover the mesh (see SearchStatus).
+  MIGRATION_PHASE_SEARCHING = 5;
+}
+
+// BandMode is the state of one band's radio within a migration.
+enum BandMode {
+  // BAND_MODE_UNSPECIFIED is the zero value and is never reported.
+  BAND_MODE_UNSPECIFIED = 0;
+
+  // BAND_MODE_SETTLED means the band is not verifying, falling back or
+  // searching. It may still sit off its plan assignment after a fallback
+  // until it has heard nobody for the peer-loss timeout.
+  BAND_MODE_SETTLED = 1;
+
+  // BAND_MODE_VERIFYING means the band switched while it had peers and
+  // waits, until deadline, to hear a peer on the new assignment.
+  BAND_MODE_VERIFYING = 2;
+
+  // BAND_MODE_FALLBACK means no peer was heard on the new assignment, so
+  // the band returned to its previous assignment; if no peer is heard there
+  // by deadline it returns to the plan assignment.
+  BAND_MODE_FALLBACK = 3;
+
+  // BAND_MODE_SEARCHING means the band is sweeping its search list during
+  // rediscovery.
+  BAND_MODE_SEARCHING = 4;
+}
+
+// ChannelAssignment is one band's channel number and width. Legal widths
+// depend on the band: HaLow 1, 2, 4 or 8 MHz; 2.4 GHz 20 or 40 MHz; 5 GHz
+// 20, 40, 80 or 160 MHz.
+message ChannelAssignment {
+  option (buf.validate.message).cel = {
+    id: "channel_assignment.width_for_band"
+    message: "width_mhz is not a legal width for band (HaLow 1/2/4/8, 2.4 GHz 20/40, 5 GHz 20/40/80/160)"
+    expression: "(this.band == 1 && this.width_mhz in [1u, 2u, 4u, 8u]) || (this.band == 2 && this.width_mhz in [20u, 40u]) || (this.band == 3 && this.width_mhz in [20u, 40u, 80u, 160u])"
+  };
+
+  // band is the radio band. Channel migration manages only BAND_HALOW,
+  // BAND_2_4_GHZ and BAND_5_GHZ.
+  openmanet.radio.v1.Band band = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    in: [
+      1,
+      2,
+      3
+    ]
+  }];
+
+  // channel is the channel number as written to UCI (for HaLow the S1G
+  // channel number, e.g. 28).
+  uint32 channel = 2 [(buf.validate.field).uint32 = {
+    gt: 0
+    lte: 65535
+  }];
+
+  // width_mhz is the channel width in megahertz.
+  uint32 width_mhz = 3 [(buf.validate.field).uint32 = {
+    in: [
+      1,
+      2,
+      4,
+      8,
+      20,
+      40,
+      80,
+      160
+    ]
+  }];
+}
+
+// ChannelPlan is a verified, signed channel plan. Times have millisecond
+// precision (the canonical signed encoding's resolution).
+message ChannelPlan {
+  // version increases monotonically across the mesh. Version 0 is reserved
+  // for the provisioned initial assignments and never appears in a plan.
+  uint64 version = 1;
+
+  // signer_id is the node ID of the coordinator that signed the plan.
+  uint64 signer_id = 2;
+
+  // issued_at is when the coordinator created the plan.
+  google.protobuf.Timestamp issued_at = 3;
+
+  // activate_at is the not-before switch time of the first changed band.
+  // A node without a disciplined clock (see
+  // ChannelMigrationStatus.clock_synced) times the switch from when it
+  // received the plan, using activate_at - issued_at as the lead.
+  google.protobuf.Timestamp activate_at = 4;
+
+  // stagger separates the switch times of successive changed bands, so one
+  // band is verified before the next one moves.
+  google.protobuf.Duration stagger = 5;
+
+  // assignments hold at most one entry per band, sorted by band. A managed
+  // band with no entry uses its provisioned initial assignment.
+  repeated ChannelAssignment assignments = 6;
+}
+
+// BandStatus is the migration state of one managed band.
+message BandStatus {
+  // band is the radio band.
+  openmanet.radio.v1.Band band = 1;
+
+  // operating is the assignment the radio is tuned to (or, while
+  // radio_failed, the assignment it will be retried on).
+  ChannelAssignment operating = 2;
+
+  // target is the assignment the current plan gives this band, or the
+  // provisioned initial assignment when no plan covers it.
+  ChannelAssignment target = 3;
+
+  // mode is the band's migration state.
+  BandMode mode = 4;
+
+  // mode_since is when the band entered mode (or was last re-tuned in it).
+  google.protobuf.Timestamp mode_since = 5;
+
+  // deadline ends the verify or fallback window. Unset unless mode is
+  // BAND_MODE_VERIFYING or BAND_MODE_FALLBACK.
+  google.protobuf.Timestamp deadline = 6;
+
+  // switch_at is when the band is scheduled to switch to switch_to. Unset
+  // when no switch is scheduled.
+  google.protobuf.Timestamp switch_at = 7;
+
+  // switch_to is the scheduled assignment. Unset when switch_at is unset.
+  ChannelAssignment switch_to = 8;
+
+  // previous is the assignment the band used before its last switch, the
+  // one it falls back to. Unset before the first switch.
+  ChannelAssignment previous = 9;
+
+  // last_peer_at is when a peer was last heard on this band. Unset when
+  // none was heard since start.
+  google.protobuf.Timestamp last_peer_at = 10;
+
+  // radio_failed is true when the last tune failed; the radio is retried
+  // periodically and the band neither sends nor receives until it succeeds.
+  bool radio_failed = 11;
+
+  // search_candidates is the length of the band's rediscovery search list
+  // (last-known plan, older plans, initial, rendezvous, then allowed list,
+  // de-duplicated). Zero before the first search.
+  uint32 search_candidates = 12;
+}
+
+// SearchStatus is the rediscovery schedule. A seek epoch visits each
+// candidate for one dwell; between epochs a node may park on a rendezvous
+// channel for two epochs, never twice in a row.
+message SearchStatus {
+  // started_at is when the current (or most recent) search started.
+  google.protobuf.Timestamp started_at = 1;
+
+  // epoch counts completed seek or park epochs in this search.
+  uint32 epoch = 2;
+
+  // step is the candidate index being visited in the current seek epoch.
+  uint32 step = 3;
+
+  // steps is the length of the longest band search list (one seek epoch).
+  uint32 steps = 4;
+
+  // parking is true while the node parks on a rendezvous channel.
+  bool parking = 5;
+
+  // parks counts park epochs in this search.
+  uint32 parks = 6;
+}
+
+// PeerStatus is one peer heard within the peer window.
+message PeerStatus {
+  // node_id is the peer's channel-migration node ID.
+  uint64 node_id = 1;
+
+  // last_seen is when a message from the peer was last received on any
+  // band.
+  google.protobuf.Timestamp last_seen = 2;
+}
+
+// TrustedKey is one trusted plan-authority Ed25519 public key.
+message TrustedKey {
+  // fingerprint is the lowercase hex SHA-256 of the 32-byte raw public
+  // key, for comparing keys between nodes by eye.
+  string fingerprint = 1;
+
+  // public_key is the 32-byte raw Ed25519 public key.
+  bytes public_key = 2;
+}
+
+// MigrationStats count protocol events since the node started.
+message MigrationStats {
+  // accepted counts plans accepted as current.
+  uint64 accepted = 1;
+
+  // rejected counts plans rejected for a bad signature, a different mesh
+  // or a local policy violation.
+  uint64 rejected = 2;
+
+  // stale counts verified plans older than the current one.
+  uint64 stale = 3;
+
+  // malformed counts undecodable messages.
+  uint64 malformed = 4;
+
+  // fallbacks counts bands that heard no peer after switching and fell
+  // back.
+  uint64 fallbacks = 5;
+
+  // searches counts rediscovery searches started.
+  uint64 searches = 6;
+
+  // recoveries counts searches that ended by hearing a peer.
+  uint64 recoveries = 7;
+
+  // aborts counts plans this coordinator reverted for too few
+  // acknowledgements.
+  uint64 aborts = 8;
+
+  // radio_errors counts failed radio tunes.
+  uint64 radio_errors = 9;
+
+  // send_errors counts failed broadcasts.
+  uint64 send_errors = 10;
+}
+
+// ChannelMigrationStatus is a point-in-time view of the channel-migration
+// node. When enabled is false every other field is unset.
+message ChannelMigrationStatus {
+  // generated_at is when this view was assembled.
+  google.protobuf.Timestamp generated_at = 1;
+
+  // enabled is true when channel migration runs on this node.
+  bool enabled = 2;
+
+  // node_id is this node's channel-migration node ID (by default derived
+  // from the batman interface MAC).
+  uint64 node_id = 3;
+
+  // mesh_id is the mesh every accepted plan must be bound to.
+  uint64 mesh_id = 4;
+
+  // coordinator is true when this node holds the plan-authority private
+  // key and may call ProposeChannelPlan.
+  bool coordinator = 5;
+
+  // coordinating is true when this node signed current_plan and is
+  // collecting acknowledgements for it.
+  bool coordinating = 6;
+
+  // clock_synced is true when the clock is disciplined (GNSS or NTP);
+  // otherwise plan switches are timed from receipt.
+  bool clock_synced = 7;
+
+  // phase is the node-level migration state.
+  MigrationPhase phase = 8;
+
+  // current_plan is the accepted plan with the highest version. Unset
+  // while the node runs on its provisioned initial assignments.
+  ChannelPlan current_plan = 9;
+
+  // previous_plan is the plan current_plan superseded. Unset when none is
+  // held.
+  ChannelPlan previous_plan = 10;
+
+  // bands has one entry per managed band, sorted by band.
+  repeated BandStatus bands = 11;
+
+  // search is the rediscovery schedule. Unset unless phase is
+  // MIGRATION_PHASE_SEARCHING.
+  SearchStatus search = 12;
+
+  // last_search is how long the most recent completed search took. Unset
+  // when no search has completed.
+  google.protobuf.Duration last_search = 13;
+
+  // peers are the peers heard within the peer window, at most 256.
+  repeated PeerStatus peers = 14;
+
+  // acks counts distinct nodes that acknowledged current_plan before its
+  // activation. A coordinator reverts the plan when, one abort margin
+  // before activation, no more than half of its peers acknowledged.
+  uint32 acks = 15;
+
+  // trusted_keys are the plan-authority public keys plans are verified
+  // against, at most 8 (more than one only during a rotation).
+  repeated TrustedKey trusted_keys = 16;
+
+  // stats count protocol events since the node started.
+  MigrationStats stats = 17;
+}

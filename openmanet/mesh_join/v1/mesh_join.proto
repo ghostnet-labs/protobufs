@@ -62,6 +62,27 @@ message MeshJoinPayload {
 
   // Present only when the source node runs a 2.4 GHz mesh backhaul.
   MeshCredentials backhaul = 3;
+
+  // Channel-migration plan-authority Ed25519 public keys trusted by the
+  // source node, each the 32-byte raw key; at most 8, more than one only
+  // during a key rotation. A joining node that runs channel migration
+  // verifies channel plans against these keys (see
+  // openmanet.chanmig.v1.ChannelMigrationStatus.trusted_keys). Empty when
+  // the source node does not run channel migration; the joining node then
+  // keeps its own trusted keys. Never carries a private key.
+  repeated bytes plan_authority_public_keys = 4 [(buf.validate.field).repeated = {
+    max_items: 8
+    unique: true
+    items: {
+      bytes: {len: 32}
+    }
+  }];
+
+  // Channel-migration mesh ID of the source node (chanmig.meshId). A joining
+  // node needs it, together with plan_authority_public_keys, to accept that
+  // mesh's channel plans. Unset when the source node does not run channel
+  // migration.
+  optional uint64 chanmig_mesh_id = 5;
 }
 
 // GetMeshJoinQRResponse carries the payload three ways: decoded for the
