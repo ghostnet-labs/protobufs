@@ -1,0 +1,541 @@
+syntax = "proto3";
+
+package openmanet.radio.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+// Band is a radio frequency band. Radio capacity uses every value; path
+// selection uses only BAND_HALOW, BAND_2_4_GHZ and BAND_5_GHZ.
+enum Band {
+  // BAND_UNSPECIFIED is the zero value. On a PathDecision it means no band
+  // is selected (no eligible path).
+  BAND_UNSPECIFIED = 0;
+
+  // BAND_HALOW is sub-1 GHz 802.11ah (HaLow, "s1g").
+  BAND_HALOW = 1;
+
+  // BAND_2_4_GHZ is the 2.4 GHz band.
+  BAND_2_4_GHZ = 2;
+
+  // BAND_5_GHZ is the 5 GHz band.
+  BAND_5_GHZ = 3;
+
+  // BAND_6_GHZ is the 6 GHz band.
+  BAND_6_GHZ = 4;
+
+  // BAND_60_GHZ is the 60 GHz band.
+  BAND_60_GHZ = 5;
+}
+
+// CapacityGateMode says how the radio-capacity admission gate is applied.
+enum CapacityGateMode {
+  // CAPACITY_GATE_MODE_UNSPECIFIED is the zero value and is never reported.
+  CAPACITY_GATE_MODE_UNSPECIFIED = 0;
+
+  // CAPACITY_GATE_MODE_OFF means no admission decisions are made or
+  // recorded.
+  CAPACITY_GATE_MODE_OFF = 1;
+
+  // CAPACITY_GATE_MODE_ADVISORY means decisions are made and recorded but
+  // never block a radio change: a reject or defer is reported only.
+  CAPACITY_GATE_MODE_ADVISORY = 2;
+
+  // CAPACITY_GATE_MODE_ENFORCE means a reject or defer blocks the radio
+  // change it was made for.
+  CAPACITY_GATE_MODE_ENFORCE = 3;
+}
+
+// InterfaceType is an nl80211 interface type counted by a PHY's interface
+// combinations.
+enum InterfaceType {
+  // INTERFACE_TYPE_UNSPECIFIED is the zero value.
+  INTERFACE_TYPE_UNSPECIFIED = 0;
+
+  // INTERFACE_TYPE_MANAGED is a station ("managed") interface.
+  INTERFACE_TYPE_MANAGED = 1;
+
+  // INTERFACE_TYPE_AP is an access point interface.
+  INTERFACE_TYPE_AP = 2;
+
+  // INTERFACE_TYPE_MESH_POINT is an 802.11s mesh point interface.
+  INTERFACE_TYPE_MESH_POINT = 3;
+}
+
+// InterfaceTypeLimit is the most interfaces of one type any of a PHY's
+// combinations allows.
+message InterfaceTypeLimit {
+  // type is the interface type.
+  InterfaceType type = 1;
+
+  // max is the largest number of interfaces of type any combination allows.
+  uint32 max = 2;
+}
+
+// PhyCapacity summarizes what a PHY can carry in its most permissive
+// combination for each dimension. The dimensions can come from different
+// combinations, so this is a ceiling for display; admission always checks a
+// single combination.
+message PhyCapacity {
+  // max_by_type is the per-interface-type ceiling.
+  repeated InterfaceTypeLimit max_by_type = 1;
+
+  // max_interfaces is the most interfaces any combination allows.
+  uint32 max_interfaces = 2;
+
+  // max_channels is the most distinct channels any combination allows.
+  uint32 max_channels = 3;
+}
+
+// Phy is one independently tunable radio (one wiphy, or one radio of a
+// multi-radio wiphy). Virtual interfaces on a PHY are not extra radios.
+message Phy {
+  // name identifies the radio: the wiphy name ("phy0"), or
+  // "<wiphy>/radio<N>" for one radio of a multi-radio wiphy.
+  string name = 1;
+
+  // wiphy is the kernel wiphy the radio belongs to.
+  string wiphy = 2;
+
+  // radio_index is the radio index inside a multi-radio wiphy, empty
+  // otherwise.
+  string radio_index = 3;
+
+  // bands are the bands the PHY can tune to.
+  repeated Band bands = 4;
+
+  // qualified is true when qualification evidence covers this PHY. It is
+  // never derived from enumeration alone.
+  bool qualified = 5;
+
+  // available is false for a failed, missing or stale PHY.
+  bool available = 6;
+
+  // sharing_qualified is true when more than one interface on the same
+  // channel (for example a same-channel EUD access point beside the mesh)
+  // is qualified on this PHY.
+  bool sharing_qualified = 7;
+
+  // is_halow is true for an 802.11ah radio. Its bands list BAND_HALOW even
+  // though the driver reports 5 GHz channel numbers.
+  bool is_halow = 8;
+
+  // capacity is the per-dimension ceiling of the PHY.
+  PhyCapacity capacity = 9;
+}
+
+// RadioCapacity is the node's radio inventory and admission gate state.
+message RadioCapacity {
+  // generated_at is when this view was assembled.
+  google.protobuf.Timestamp generated_at = 1;
+
+  // gate_mode is how admission decisions are applied.
+  CapacityGateMode gate_mode = 2;
+
+  // phys has one entry per PHY in the capacity model.
+  repeated Phy phys = 3;
+
+  // inventory_updated_at is when the PHY inventory was last refreshed.
+  // Unset when it was never read.
+  google.protobuf.Timestamp inventory_updated_at = 4;
+}
+
+// DemandPurpose says why a radio demand exists.
+enum DemandPurpose {
+  // DEMAND_PURPOSE_UNSPECIFIED is the zero value.
+  DEMAND_PURPOSE_UNSPECIFIED = 0;
+
+  // DEMAND_PURPOSE_MESH is the running mesh.
+  DEMAND_PURPOSE_MESH = 1;
+
+  // DEMAND_PURPOSE_MESH_MIGRATION is the target mesh during a channel
+  // migration.
+  DEMAND_PURPOSE_MESH_MIGRATION = 2;
+
+  // DEMAND_PURPOSE_EUD_ACCESS is an end-user-device access point.
+  DEMAND_PURPOSE_EUD_ACCESS = 3;
+
+  // DEMAND_PURPOSE_OTHER is any other demand.
+  DEMAND_PURPOSE_OTHER = 4;
+}
+
+// DemandRole is what a demand does on the air.
+enum DemandRole {
+  // DEMAND_ROLE_UNSPECIFIED is the zero value.
+  DEMAND_ROLE_UNSPECIFIED = 0;
+
+  // DEMAND_ROLE_MESH is a mesh point interface.
+  DEMAND_ROLE_MESH = 1;
+
+  // DEMAND_ROLE_AP is an access point interface.
+  DEMAND_ROLE_AP = 2;
+
+  // DEMAND_ROLE_STATION is a station (managed) interface.
+  DEMAND_ROLE_STATION = 3;
+}
+
+// Channel is a channel identity. Width is part of it: a 20 MHz and a 40 MHz
+// channel at the same center are two channels.
+message Channel {
+  // band is the channel's band.
+  Band band = 1;
+
+  // center_khz is the center frequency in kilohertz.
+  uint32 center_khz = 2;
+
+  // width_khz is the channel width in kilohertz.
+  uint32 width_khz = 3;
+}
+
+// Demand is one interface that must run simultaneously with the others.
+message Demand {
+  // id identifies the demand within a decision, e.g. "mesh0".
+  string id = 1;
+
+  // purpose is why the demand exists.
+  DemandPurpose purpose = 2;
+
+  // role is what the demand does on the air.
+  DemandRole role = 3;
+
+  // channel is the channel the demand uses.
+  Channel channel = 4;
+}
+
+// AdmissionOutcome is the admission verdict.
+enum AdmissionOutcome {
+  // ADMISSION_OUTCOME_UNSPECIFIED is the zero value and is never reported.
+  ADMISSION_OUTCOME_UNSPECIFIED = 0;
+
+  // ADMISSION_OUTCOME_ADMIT means the requested demands can run.
+  ADMISSION_OUTCOME_ADMIT = 1;
+
+  // ADMISSION_OUTCOME_DEFER means the request may fit later (for example
+  // once an unavailable PHY returns).
+  ADMISSION_OUTCOME_DEFER = 2;
+
+  // ADMISSION_OUTCOME_REJECT means the request does not fit.
+  ADMISSION_OUTCOME_REJECT = 3;
+}
+
+// AdmissionReason is the machine-readable cause of an AdmissionOutcome.
+enum AdmissionReason {
+  // ADMISSION_REASON_UNSPECIFIED is the zero value and is never reported.
+  ADMISSION_REASON_UNSPECIFIED = 0;
+
+  // ADMISSION_REASON_FITS means all demands fit on qualified capacity
+  // (or on unqualified PHYs permitted by policy, see uses_unqualified).
+  ADMISSION_REASON_FITS = 1;
+
+  // ADMISSION_REASON_CAPACITY_SHORT means the simultaneous demands exceed
+  // the PHYs' permitted interface combinations and channels.
+  ADMISSION_REASON_CAPACITY_SHORT = 2;
+
+  // ADMISSION_REASON_NO_ELIGIBLE_PHY means no available qualified PHY
+  // supports the demands listed in unplaceable.
+  ADMISSION_REASON_NO_ELIGIBLE_PHY = 3;
+
+  // ADMISSION_REASON_UNQUALIFIED_ONLY means the demands fit only on
+  // unqualified PHYs.
+  ADMISSION_REASON_UNQUALIFIED_ONLY = 4;
+
+  // ADMISSION_REASON_PHY_UNAVAILABLE means capacity exists only on PHYs
+  // that are currently unavailable; the outcome is a defer.
+  ADMISSION_REASON_PHY_UNAVAILABLE = 5;
+
+  // ADMISSION_REASON_BOUNDED_INTERRUPTION_APPROVED means the request was
+  // admitted by pausing the demands in interrupt for at most
+  // max_interruption, as the policy permits.
+  ADMISSION_REASON_BOUNDED_INTERRUPTION_APPROVED = 6;
+
+  // ADMISSION_REASON_SEARCH_BUDGET_EXCEEDED means the assignment search
+  // budget ran out before an answer was found; never an admission.
+  ADMISSION_REASON_SEARCH_BUDGET_EXCEEDED = 7;
+}
+
+// AlternativeKind names a change that would let a request fit.
+enum AlternativeKind {
+  // ALTERNATIVE_KIND_UNSPECIFIED is the zero value and is never reported.
+  ALTERNATIVE_KIND_UNSPECIFIED = 0;
+
+  // ALTERNATIVE_KIND_INTERRUPT_DEMAND means pausing the subject current
+  // demand frees enough capacity. Subjects are demand ids.
+  ALTERNATIVE_KIND_INTERRUPT_DEMAND = 1;
+
+  // ALTERNATIVE_KIND_RESTORE_PHY means the subject PHYs are qualified but
+  // unavailable or stale. Subjects are PHY names.
+  ALTERNATIVE_KIND_RESTORE_PHY = 2;
+
+  // ALTERNATIVE_KIND_QUALIFY_PHY means the request fits on the subject PHYs
+  // but they are not qualified. Subjects are PHY names.
+  ALTERNATIVE_KIND_QUALIFY_PHY = 3;
+}
+
+// PhysicalQualification says whether a decision was checked against
+// physical (measured) radio behavior.
+enum PhysicalQualification {
+  // PHYSICAL_QUALIFICATION_UNSPECIFIED is the zero value.
+  PHYSICAL_QUALIFICATION_UNSPECIFIED = 0;
+
+  // PHYSICAL_QUALIFICATION_NOT_EVALUATED means the decision evaluates the
+  // capacity model only. Concurrency, RF isolation and driver behavior
+  // still have to be measured on hardware. Every current decision reports
+  // this value.
+  PHYSICAL_QUALIFICATION_NOT_EVALUATED = 1;
+}
+
+// Alternative is one way a request could be satisfied.
+message Alternative {
+  // kind names the change.
+  AlternativeKind kind = 1;
+
+  // subjects are the demand ids or PHY names the change applies to (see
+  // kind).
+  repeated string subjects = 2;
+
+  // approved is true when the current policy already permits the change.
+  bool approved = 3;
+}
+
+// Placement lists the demands assigned to one PHY.
+message Placement {
+  // phy is the PHY name.
+  string phy = 1;
+
+  // demand_ids are the ids of the demands placed on phy.
+  repeated string demand_ids = 2;
+}
+
+// AdmissionDecision is one recorded radio-capacity admission answer.
+message AdmissionDecision {
+  // decided_at is when the decision was made.
+  google.protobuf.Timestamp decided_at = 1;
+
+  // gate_mode is the gate mode in force when the decision was made. Under
+  // CAPACITY_GATE_MODE_ADVISORY a reject or defer did not block anything.
+  CapacityGateMode gate_mode = 2;
+
+  // current are the demands already running when the request was made.
+  repeated Demand current = 3;
+
+  // requested are the demands the request asked to add.
+  repeated Demand requested = 4;
+
+  // outcome is the verdict.
+  AdmissionOutcome outcome = 5;
+
+  // reason is the machine-readable cause of outcome.
+  AdmissionReason reason = 6;
+
+  // explanation is a human-readable summary of the decision, including its
+  // alternatives.
+  string explanation = 7;
+
+  // placements assign every demand to a PHY when the request fits.
+  repeated Placement placements = 8;
+
+  // interrupt lists the ids of current demands paused by an approved
+  // bounded interruption.
+  repeated string interrupt = 9;
+
+  // unplaceable lists the ids of demands no eligible PHY supports.
+  repeated string unplaceable = 10;
+
+  // alternatives are changes that would let the request fit.
+  repeated Alternative alternatives = 11;
+
+  // max_interruption bounds an approved interruption. Unset when none.
+  google.protobuf.Duration max_interruption = 12;
+
+  // uses_unqualified is true when the placements use unqualified PHYs by
+  // policy.
+  bool uses_unqualified = 13;
+
+  // physical_qualification is always PHYSICAL_QUALIFICATION_NOT_EVALUATED.
+  PhysicalQualification physical_qualification = 14;
+}
+
+// TrafficClass is a path-selection traffic class, highest priority first.
+enum TrafficClass {
+  // TRAFFIC_CLASS_UNSPECIFIED is the zero value. As a filter it matches
+  // every class.
+  TRAFFIC_CLASS_UNSPECIFIED = 0;
+
+  // TRAFFIC_CLASS_CONTROL is mesh and node control traffic.
+  TRAFFIC_CLASS_CONTROL = 1;
+
+  // TRAFFIC_CLASS_VOICE is push-to-talk and other real-time audio.
+  TRAFFIC_CLASS_VOICE = 2;
+
+  // TRAFFIC_CLASS_BULK is everything else.
+  TRAFFIC_CLASS_BULK = 3;
+}
+
+// PathReason says why a path decision kept or changed its band.
+enum PathReason {
+  // PATH_REASON_UNSPECIFIED is the zero value and is never reported.
+  PATH_REASON_UNSPECIFIED = 0;
+
+  // PATH_REASON_INITIAL is the first selection for the path.
+  PATH_REASON_INITIAL = 1;
+
+  // PATH_REASON_DWELL means the band was kept because it is still inside
+  // its minimum dwell time.
+  PATH_REASON_DWELL = 2;
+
+  // PATH_REASON_HOLD_MARGIN means the band was kept because no candidate
+  // beats it by the switching margin.
+  PATH_REASON_HOLD_MARGIN = 3;
+
+  // PATH_REASON_BETTER means the selection switched to a candidate that
+  // beat the current band by the margin.
+  PATH_REASON_BETTER = 4;
+
+  // PATH_REASON_FAILOVER means the selection switched because the current
+  // band became ineligible (dwell is ignored).
+  PATH_REASON_FAILOVER = 5;
+
+  // PATH_REASON_OVERRIDE means the band is pinned by a manual override.
+  PATH_REASON_OVERRIDE = 6;
+
+  // PATH_REASON_OVERRIDE_INELIGIBLE means the override band is ineligible,
+  // so the best eligible band is used instead.
+  PATH_REASON_OVERRIDE_INELIGIBLE = 7;
+
+  // PATH_REASON_NO_ELIGIBLE_PATH means no band is eligible; band is
+  // unspecified.
+  PATH_REASON_NO_ELIGIBLE_PATH = 8;
+}
+
+// PathIneligibility says why a candidate band may not carry a class.
+enum PathIneligibility {
+  // PATH_INELIGIBILITY_UNSPECIFIED means the candidate is eligible.
+  PATH_INELIGIBILITY_UNSPECIFIED = 0;
+
+  // PATH_INELIGIBILITY_NO_METRICS means nothing is known for the band, for
+  // example when the destination has no radio on it.
+  PATH_INELIGIBILITY_NO_METRICS = 1;
+
+  // PATH_INELIGIBILITY_UNREACHABLE means the destination is not reachable
+  // on the band.
+  PATH_INELIGIBILITY_UNREACHABLE = 2;
+
+  // PATH_INELIGIBILITY_STALE_METRICS means the band's metrics are too old.
+  PATH_INELIGIBILITY_STALE_METRICS = 3;
+
+  // PATH_INELIGIBILITY_RADIO_CAPACITY means the radio-capacity gate does
+  // not admit the band; detail carries the gate's reason.
+  PATH_INELIGIBILITY_RADIO_CAPACITY = 4;
+
+  // PATH_INELIGIBILITY_LOSS_TOO_HIGH means packet loss exceeds the class
+  // threshold.
+  PATH_INELIGIBILITY_LOSS_TOO_HIGH = 5;
+
+  // PATH_INELIGIBILITY_LATENCY_TOO_HIGH means latency exceeds the class
+  // threshold.
+  PATH_INELIGIBILITY_LATENCY_TOO_HIGH = 6;
+
+  // PATH_INELIGIBILITY_JITTER_TOO_HIGH means jitter exceeds the class
+  // threshold.
+  PATH_INELIGIBILITY_JITTER_TOO_HIGH = 7;
+
+  // PATH_INELIGIBILITY_INSUFFICIENT_CAPACITY means spare capacity is below
+  // the class minimum.
+  PATH_INELIGIBILITY_INSUFFICIENT_CAPACITY = 8;
+
+  // PATH_INELIGIBILITY_PROTECTED_FOR_PRIORITY means the band carries
+  // control or voice to the same destination without enough headroom for
+  // bulk.
+  PATH_INELIGIBILITY_PROTECTED_FOR_PRIORITY = 9;
+}
+
+// PathMetrics describe one (destination, band) path.
+message PathMetrics {
+  // updated_at is when the metrics were measured.
+  google.protobuf.Timestamp updated_at = 1;
+
+  // latency is the one-way latency estimate.
+  google.protobuf.Duration latency = 2;
+
+  // jitter is the one-way jitter estimate.
+  google.protobuf.Duration jitter = 3;
+
+  // capacity_kbps is the estimated spare capacity in kilobits per second.
+  uint32 capacity_kbps = 4;
+
+  // loss_permille is packet loss in parts per thousand (0 to 1000).
+  uint32 loss_permille = 5;
+
+  // reachable is false when the destination is not reachable on the band.
+  bool reachable = 6;
+}
+
+// PathCandidate is one band as evaluated for a path decision.
+message PathCandidate {
+  // band is the candidate band.
+  Band band = 1;
+
+  // eligible is true when the band may carry the class.
+  bool eligible = 2;
+
+  // ineligibility says why the band may not carry the class; unspecified
+  // when eligible.
+  PathIneligibility ineligibility = 3;
+
+  // detail adds context, e.g. the capacity gate's reason or metric age.
+  string detail = 4;
+
+  // has_metrics is false when nothing is known for the band; metrics is
+  // then unset.
+  bool has_metrics = 5;
+
+  // metrics are the measurements the decision used.
+  PathMetrics metrics = 6;
+
+  // score is the class score, 0 to 100 (higher is better).
+  double score = 7;
+
+  // selected is true for the band chosen as the active path.
+  bool selected = 8;
+}
+
+// PathDecision is the latest selection for one (destination, traffic
+// class), suitable for display to an end-user device.
+message PathDecision {
+  // destination identifies the remote node the path leads to.
+  string destination = 1;
+
+  // traffic_class is the class the decision applies to.
+  TrafficClass traffic_class = 2;
+
+  // band is the single active path; unspecified when none is eligible.
+  Band band = 3;
+
+  // previous_band is the band before this decision when it changed,
+  // unspecified otherwise.
+  Band previous_band = 4;
+
+  // duplicate_band is the opt-in voice duplicate band, unspecified
+  // otherwise. It is never used for control or bulk.
+  Band duplicate_band = 5;
+
+  // override_band is the manually pinned band, unspecified when not
+  // overridden.
+  Band override_band = 6;
+
+  // reason says why the band was kept or changed.
+  PathReason reason = 7;
+
+  // explanation is a human-readable summary of the decision, naming the
+  // rejected alternatives and why.
+  string explanation = 8;
+
+  // candidates has one entry per candidate band, including ineligible ones.
+  repeated PathCandidate candidates = 9;
+
+  // since is when band became the active path.
+  google.protobuf.Timestamp since = 10;
+
+  // decided_at is when this decision was made.
+  google.protobuf.Timestamp decided_at = 11;
+}
