@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+package openmanet.chanmig.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "openmanet/chanmig/v1/chanmig.proto";
+
+// ChannelMigrationService exposes authenticated channel migration: the
+// node's view of the signed channel plan, its per-band migration and
+// rediscovery state and the peers it hears, and, on coordinator nodes, a
+// way to sign and distribute a new plan.
+//
+// Every RPC requires a session (the auth middleware does not exempt them).
+service ChannelMigrationService {
+  // GetChannelMigrationStatus returns the channel-migration status. When
+  // channel migration is disabled it succeeds with enabled false.
+  rpc GetChannelMigrationStatus(GetChannelMigrationStatusRequest) returns (GetChannelMigrationStatusResponse);
+
+  // ProposeChannelPlan signs a plan with the next version and starts
+  // distributing it; every node, including this one, switches at
+  // activate_at, changed bands one stagger apart.
+  //
+  // FAILED_PRECONDITION when channel migration is disabled or this node
+  // holds no plan-authority private key (it is not a coordinator).
+  // INVALID_ARGUMENT when an assignment is outside its band's allowed list
+  // or lead exceeds this node's configured maximum lead (default 10
+  // minutes).
+  rpc ProposeChannelPlan(ProposeChannelPlanRequest) returns (ProposeChannelPlanResponse);
+}
+
+// GetChannelMigrationStatusRequest is reserved for future options.
+message GetChannelMigrationStatusRequest {}
+
+// GetChannelMigrationStatusResponse carries the channel-migration status.
+message GetChannelMigrationStatusResponse {
+  // status is the channel-migration node view.
+  ChannelMigrationStatus status = 1;
+}
+
+// ProposeChannelPlanRequest describes the plan to sign.
+message ProposeChannelPlanRequest {
+  option (buf.validate.message).cel = {
+    id: "propose_channel_plan_request.unique_bands"
+    message: "assignments must hold at most one entry per band"
+    expression: "this.assignments.all(a, this.assignments.filter(b, b.band == a.band).size() == 1)"
+  };
+
+  // assignments give each band its channel and width, at most one per band
+  // in any order. A plan replaces the previous one whole: a managed band
+  // left out returns to its provisioned initial assignment, so list every
+  // band that should keep a non-initial assignment.
+  repeated ChannelAssignment assignments = 1 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 3
+  }];
+
+  // lead is how long from now the plan activates, 0 to 10 minutes (the
+  // chanmig MaxLead default; nodes reject plans with a longer lead). It
+  // should exceed the abort margin (30 s by default) so peers can
+  // acknowledge before the coordinator checks for a quorum.
+  google.protobuf.Duration lead = 2 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).duration = {
+      gte: {}
+      lte: {seconds: 600}
+    }
+  ];
+}
+
+// ProposeChannelPlanResponse carries the signed plan.
+message ProposeChannelPlanResponse {
+  // plan is the signed plan as accepted by this node: its version and
+  // activate_at are the values every node will act on.
+  ChannelPlan plan = 1;
+}
