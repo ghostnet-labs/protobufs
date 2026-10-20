@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+package openmanet.radio.v1;
+
+import "buf/validate/validate.proto";
+import "openmanet/radio/v1/radio.proto";
+
+// RadioService exposes, read-only, the radio-capacity model and the
+// decisions made with it: the PHY inventory and admission gate mode,
+// recent radio-capacity admission decisions (admit, defer or reject, with
+// reasons and alternatives), and the per-destination, per-traffic-class
+// path selection decisions (chosen band, previous band, candidates and
+// why each was or was not chosen).
+//
+// Every RPC requires a session (the auth middleware does not exempt them).
+// Decisions evaluate the capacity model only and never assert physical
+// qualification.
+service RadioService {
+  // GetRadioCapacity returns the PHY inventory and the admission gate mode.
+  rpc GetRadioCapacity(GetRadioCapacityRequest) returns (GetRadioCapacityResponse);
+
+  // ListAdmissionDecisions returns the newest recorded admission decisions,
+  // newest first. The daemon keeps a bounded ring of 64 decisions.
+  rpc ListAdmissionDecisions(ListAdmissionDecisionsRequest) returns (ListAdmissionDecisionsResponse);
+
+  // ListPathDecisions returns the latest path decision for each
+  // (destination, traffic class) matching the filters, newest decided_at
+  // first.
+  rpc ListPathDecisions(ListPathDecisionsRequest) returns (ListPathDecisionsResponse);
+}
+
+// GetRadioCapacityRequest is reserved for future options.
+message GetRadioCapacityRequest {}
+
+// GetRadioCapacityResponse carries the radio capacity view.
+message GetRadioCapacityResponse {
+  // capacity is the PHY inventory and admission gate state.
+  RadioCapacity capacity = 1;
+}
+
+// ListAdmissionDecisionsRequest bounds the admission decisions returned.
+message ListAdmissionDecisionsRequest {
+  // limit is the maximum number of decisions to return, 1 to 64.
+  uint32 limit = 1 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 64
+  }];
+}
+
+// ListAdmissionDecisionsResponse carries the selected decisions.
+message ListAdmissionDecisionsResponse {
+  // decisions are the selected decisions, newest first.
+  repeated AdmissionDecision decisions = 1;
+}
+
+// ListPathDecisionsRequest filters and bounds the path decisions returned.
+message ListPathDecisionsRequest {
+  // limit is the maximum number of decisions to return, 1 to 64.
+  uint32 limit = 1 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 64
+  }];
+
+  // destination keeps only decisions for this destination when non-empty.
+  string destination = 2 [(buf.validate.field).string.max_len = 128];
+
+  // traffic_class keeps only decisions for this class when set.
+  // Unspecified returns every class.
+  TrafficClass traffic_class = 3 [(buf.validate.field).enum.defined_only = true];
+}
+
+// ListPathDecisionsResponse carries the selected decisions.
+message ListPathDecisionsResponse {
+  // decisions are the selected decisions, newest decided_at first.
+  repeated PathDecision decisions = 1;
+}
