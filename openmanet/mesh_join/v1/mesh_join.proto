@@ -77,6 +77,12 @@ message MeshJoinPayload {
       bytes: {len: 32}
     }
   }];
+
+  // Channel-migration mesh ID of the source node (chanmig.meshId). A joining
+  // node needs it, together with plan_authority_public_keys, to accept that
+  // mesh's channel plans. Unset when the source node does not run channel
+  // migration.
+  optional uint64 chanmig_mesh_id = 5;
 }
 
 // GetMeshJoinQRResponse carries the payload three ways: decoded for the
