@@ -1,0 +1,249 @@
+syntax = "proto3";
+
+package openmanet.scanner.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "openmanet/scanner/v1/scanner.proto";
+
+// ScannerService reports the node's aircraft receivers (1090 MHz ADS-B and
+// 978 MHz UAT) and its public-safety scanner: which receivers are fitted
+// and running, which P25 trunked site the wide tuner follows, the
+// control-channel decoder state, and recent talkgroup voice grants.
+//
+// With the scanner disabled (scanner.enable false, the default) every read
+// RPC succeeds with enabled false and empty data, so clients can render a
+// "scanner off" state; SetScannerConfig can enable it at runtime.
+//
+// Every RPC requires a session (the auth middleware does not exempt them).
+service ScannerService {
+  // GetScannerStatus returns receivers, the reference position, the
+  // selected site, the control-channel state and explicit stale and
+  // unavailable flags.
+  rpc GetScannerStatus(GetScannerStatusRequest) returns (GetScannerStatusResponse);
+
+  // ListAircraft returns aircraft merged by ICAO address from dump1090 and
+  // skyaware978, sorted by ICAO address.
+  rpc ListAircraft(ListAircraftRequest) returns (ListAircraftResponse);
+
+  // StreamAircraft sends a full aircraft snapshot every interval (default
+  // 1 s) until the client cancels.
+  rpc StreamAircraft(StreamAircraftRequest) returns (stream StreamAircraftResponse);
+
+  // ListSites returns the embedded regional P25 site table sorted by
+  // distance from a point (the request point, else the current position,
+  // else unsorted by distance).
+  rpc ListSites(ListSitesRequest) returns (ListSitesResponse);
+
+  // ListTalkgroupActivity returns recent voice grants, newest first, from a
+  // bounded history.
+  rpc ListTalkgroupActivity(ListTalkgroupActivityRequest) returns (ListTalkgroupActivityResponse);
+
+  // StreamScannerEvents sends voice grants, control-channel state changes
+  // and site changes as they happen until the client cancels. After any
+  // replayed grants, the first event is always the current control-channel
+  // status, so clients get an initial state (and response headers) at once.
+  // RESOURCE_EXHAUSTED when too many streams are open.
+  rpc StreamScannerEvents(StreamScannerEventsRequest) returns (stream StreamScannerEventsResponse);
+
+  // GetScannerConfig returns the persisted scanner configuration.
+  rpc GetScannerConfig(GetScannerConfigRequest) returns (GetScannerConfigResponse);
+
+  // SetScannerConfig persists the configuration and applies it at once
+  // (enabling or disabling the scanner manager included).
+  // INVALID_ARGUMENT when manual_site_key names no site in the table.
+  rpc SetScannerConfig(SetScannerConfigRequest) returns (SetScannerConfigResponse);
+}
+
+// GetScannerStatusRequest is reserved for future options.
+message GetScannerStatusRequest {}
+
+// GetScannerStatusResponse is the scanner status.
+message GetScannerStatusResponse {
+  // enabled is false when the scanner manager is not running; every other
+  // field is then unset.
+  bool enabled = 1;
+  // receivers lists the four claimed roles in order (1090, 978, wide,
+  // scan) followed by any unassigned receivers.
+  repeated Receiver receivers = 2;
+  // position is the reference position used for site selection.
+  Position position = 3;
+  // selected_site is the site the wide tuner follows; unset when none.
+  SelectedSite selected_site = 4;
+  // control_channel is the control-channel decoder state.
+  ControlChannelStatus control_channel = 5;
+  // last_decode_time is when the control-channel decoder last emitted a
+  // message (same as control_channel.last_decode_time).
+  google.protobuf.Timestamp last_decode_time = 6;
+  // position_stale is true when there is no fix or it is older than the
+  // position stale timeout.
+  bool position_stale = 7;
+  // site_unavailable is true when no site could be selected (no fix and no
+  // last known or manual site, or no site in the region filter).
+  bool site_unavailable = 8;
+  // decoder_unavailable is true when no control-channel decoder is wired.
+  bool decoder_unavailable = 9;
+  // decode_stale is true when tuned but nothing was decoded within the
+  // decode stale timeout.
+  bool decode_stale = 10;
+  // aircraft_stale is true when neither aircraft feed was updated within
+  // the aircraft stale timeout.
+  bool aircraft_stale = 11;
+  // generated_at is when the status was assembled.
+  google.protobuf.Timestamp generated_at = 12;
+}
+
+// ListAircraftRequest filters the aircraft list.
+message ListAircraftRequest {
+  // include_stale also returns aircraft not heard within the stale timeout
+  // (until they are evicted).
+  bool include_stale = 1;
+}
+
+// ListAircraftResponse carries the merged aircraft.
+message ListAircraftResponse {
+  // enabled is false when the scanner manager is not running.
+  bool enabled = 1;
+  // aircraft are sorted by ICAO address.
+  repeated Aircraft aircraft = 2;
+  // feeds report the health of the 1090 and 978 aircraft.json producers.
+  repeated AircraftFeed feeds = 3;
+  // generated_at is when the list was assembled.
+  google.protobuf.Timestamp generated_at = 4;
+}
+
+// StreamAircraftRequest configures the aircraft stream.
+message StreamAircraftRequest {
+  // include_stale as in ListAircraftRequest.
+  bool include_stale = 1;
+  // interval between snapshots, 500 ms to 10 s; unset means 1 s.
+  google.protobuf.Duration interval = 2 [(buf.validate.field).duration = {
+    gte: {nanos: 500000000}
+    lte: {seconds: 10}
+  }];
+}
+
+// StreamAircraftResponse is one aircraft snapshot.
+message StreamAircraftResponse {
+  // enabled is false when the scanner manager is not running.
+  bool enabled = 1;
+  // aircraft are sorted by ICAO address.
+  repeated Aircraft aircraft = 2;
+  // feeds report the health of the aircraft.json producers.
+  repeated AircraftFeed feeds = 3;
+  // generated_at is when the snapshot was assembled.
+  google.protobuf.Timestamp generated_at = 4;
+}
+
+// ListSitesRequest selects sites from the embedded table.
+message ListSitesRequest {
+  option (buf.validate.message).cel = {
+    id: "list_sites_request.point"
+    message: "latitude and longitude must be set together"
+    expression: "has(this.latitude) == has(this.longitude)"
+  };
+
+  // latitude of the reference point; with longitude, overrides the
+  // current position.
+  optional double latitude = 1 [(buf.validate.field).double = {
+    gte: -90
+    lte: 90
+  }];
+  // longitude of the reference point.
+  optional double longitude = 2 [(buf.validate.field).double = {
+    gte: -180
+    lte: 180
+  }];
+  // states restricts the result to these two-letter states; empty returns
+  // every state.
+  repeated string states = 3 [(buf.validate.field).repeated = {
+    max_items: 7
+    unique: true
+    items: {
+      string: {
+        in: [
+          "UT",
+          "ID",
+          "WY",
+          "CO",
+          "AZ",
+          "NV",
+          "NM"
+        ]
+      }
+    }
+  }];
+  // limit caps the number of sites returned, 0-500; 0 means 25.
+  uint32 limit = 4 [(buf.validate.field).uint32.lte = 500];
+}
+
+// ListSitesResponse carries the matching sites.
+message ListSitesResponse {
+  // sites are sorted nearest first when reference is known, else by
+  // state, system and name.
+  repeated Site sites = 1;
+  // reference is the point distances were measured from.
+  Position reference = 2;
+  // total is how many sites matched the state filter before the limit.
+  uint32 total = 3;
+}
+
+// ListTalkgroupActivityRequest limits the activity list.
+message ListTalkgroupActivityRequest {
+  // limit caps the entries returned, 0-256; 0 returns the whole history.
+  uint32 limit = 1 [(buf.validate.field).uint32.lte = 256];
+}
+
+// ListTalkgroupActivityResponse carries recent grants.
+message ListTalkgroupActivityResponse {
+  // enabled is false when the scanner manager is not running.
+  bool enabled = 1;
+  // grants are newest first (by last_time).
+  repeated VoiceGrant grants = 2;
+  // history_capacity is the size of the bounded history.
+  uint32 history_capacity = 3;
+}
+
+// StreamScannerEventsRequest configures the event stream.
+message StreamScannerEventsRequest {
+  // replay_recent first sends the current history (oldest first) as
+  // voice_grant events.
+  bool replay_recent = 1;
+}
+
+// StreamScannerEventsResponse is one scanner event.
+message StreamScannerEventsResponse {
+  // time is when the event happened.
+  google.protobuf.Timestamp time = 1;
+  // event is the event payload.
+  oneof event {
+    // voice_grant is a new or updated voice grant.
+    VoiceGrant voice_grant = 2;
+    // control_channel is a control-channel state change.
+    ControlChannelStatus control_channel = 3;
+    // site_changed is a change of the selected site.
+    SelectedSite site_changed = 4;
+  }
+}
+
+// GetScannerConfigRequest is reserved for future options.
+message GetScannerConfigRequest {}
+
+// GetScannerConfigResponse carries the configuration.
+message GetScannerConfigResponse {
+  // config is the persisted configuration with defaults applied.
+  ScannerConfig config = 1;
+}
+
+// SetScannerConfigRequest replaces the configuration.
+message SetScannerConfigRequest {
+  // config is the new configuration.
+  ScannerConfig config = 1 [(buf.validate.field).required = true];
+}
+
+// SetScannerConfigResponse carries the stored configuration.
+message SetScannerConfigResponse {
+  // config is the configuration now in force.
+  ScannerConfig config = 1;
+}
