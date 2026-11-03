@@ -54,6 +54,21 @@ service ScannerService {
   // (enabling or disabling the scanner manager included).
   // INVALID_ARGUMENT when manual_site_key names no site in the table.
   rpc SetScannerConfig(SetScannerConfigRequest) returns (SetScannerConfigResponse);
+
+  // ListConventionalChannels returns the analog conventional, aviation,
+  // interop and weather channels the scan receiver monitors near the
+  // current position, with live and last-heard state.
+  rpc ListConventionalChannels(ListConventionalChannelsRequest) returns (ListConventionalChannelsResponse);
+
+  // StreamAudio streams demodulated audio of open-squelch conventional
+  // channels for listening on the local EUD until the client cancels.
+  // Only audio leaves the node's demodulators; raw IQ is never streamed.
+  // A stream for one channel pins the scan to that channel's window. The
+  // first message carries no audio and confirms the stream.
+  // FAILED_PRECONDITION when the scanner is disabled or has no
+  // conventional receiver, NOT_FOUND for a channel_key not on the list,
+  // RESOURCE_EXHAUSTED when too many audio streams are open.
+  rpc StreamAudio(StreamAudioRequest) returns (stream StreamAudioResponse);
 }
 
 // GetScannerStatusRequest is reserved for future options.
@@ -92,6 +107,8 @@ message GetScannerStatusResponse {
   bool aircraft_stale = 11;
   // generated_at is when the status was assembled.
   google.protobuf.Timestamp generated_at = 12;
+  // conventional is the conventional (analog) scanner state.
+  ConventionalScanStatus conventional = 13;
 }
 
 // ListAircraftRequest filters the aircraft list.
@@ -246,4 +263,56 @@ message SetScannerConfigRequest {
 message SetScannerConfigResponse {
   // config is the configuration now in force.
   ScannerConfig config = 1;
+}
+
+// ListConventionalChannelsRequest is reserved for future options.
+message ListConventionalChannelsRequest {}
+
+// ListConventionalChannelsResponse carries the conventional scan list.
+message ListConventionalChannelsResponse {
+  // enabled is false when the scanner manager is not running.
+  bool enabled = 1;
+  // status is the conventional scanner state.
+  ConventionalScanStatus status = 2;
+  // channels are sorted by frequency.
+  repeated ConventionalChannel channels = 3;
+  // radius_km bounds the channels with a location.
+  double radius_km = 4;
+  // generated_at is when the list was assembled.
+  google.protobuf.Timestamp generated_at = 5;
+}
+
+// StreamAudioRequest selects the audio to stream.
+message StreamAudioRequest {
+  // channel_key limits the stream to one channel (ConventionalChannel.key)
+  // and pins the scan to it; empty streams every channel as the scan
+  // finds activity.
+  string channel_key = 1 [(buf.validate.field).string.max_len = 32];
+  // encoding is the requested payload format; unset means PCM. A server
+  // without an Opus encoder answers with PCM (see the response encoding).
+  AudioEncoding encoding = 2 [(buf.validate.field).enum.defined_only = true];
+}
+
+// StreamAudioResponse is one 20 ms audio frame.
+message StreamAudioResponse {
+  // data is the frame payload in encoding; empty in the first message.
+  bytes data = 1;
+  // encoding is the payload format.
+  AudioEncoding encoding = 2;
+  // sample_rate is the audio rate in Hz (8000).
+  uint32 sample_rate = 3;
+  // sequence counts audio frames on this stream from 1 (0 in the first
+  // message); a gap means frames were dropped for a slow client.
+  uint32 sequence = 4;
+  // channel_key is the channel the audio came from.
+  string channel_key = 5;
+  // frequency_hz is the channel frequency.
+  uint64 frequency_hz = 6;
+  // talkgroup is the P25 talkgroup of trunked voice; 0 for conventional
+  // channels.
+  uint32 talkgroup = 7;
+  // time is when the frame was demodulated.
+  google.protobuf.Timestamp time = 8;
+  // level is the squelch metric of the frame (see ConventionalChannel.level).
+  double level = 9;
 }
