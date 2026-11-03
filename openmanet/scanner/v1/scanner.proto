@@ -1,0 +1,567 @@
+syntax = "proto3";
+
+package openmanet.scanner.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+// ReceiverRole is the job a software-defined receiver is claimed for. Every
+// receiver is claimed by its USB serial number, never by bus index.
+enum ReceiverRole {
+  RECEIVER_ROLE_UNSPECIFIED = 0;
+  // RECEIVER_ROLE_ADSB_1090 is the 1090 MHz ADS-B / Mode S receiver owned by
+  // dump1090 (UCI dump1090.main.device_index).
+  RECEIVER_ROLE_ADSB_1090 = 1;
+  // RECEIVER_ROLE_UAT_978 is the 978 MHz UAT receiver owned by dump978-fa
+  // (UCI dump978-fa.main.serial).
+  RECEIVER_ROLE_UAT_978 = 2;
+  // RECEIVER_ROLE_WIDE is the wide tuner (Airspy R2 class) that follows the
+  // nearest P25 site's control channel and voice channels.
+  RECEIVER_ROLE_WIDE = 3;
+  // RECEIVER_ROLE_SCAN is the RTL-SDR scan tuner for conventional FM and
+  // aviation AM channels.
+  RECEIVER_ROLE_SCAN = 4;
+  // RECEIVER_ROLE_UNASSIGNED is a supported receiver that is plugged in but
+  // whose serial no role claims. Shown so an operator can find the serial to
+  // configure.
+  RECEIVER_ROLE_UNASSIGNED = 5;
+}
+
+// ReceiverState is the run state of a claimed receiver.
+enum ReceiverState {
+  RECEIVER_STATE_UNSPECIFIED = 0;
+  // RECEIVER_STATE_RUNNING means the device is present and its owning
+  // service produced samples or decodes recently.
+  RECEIVER_STATE_RUNNING = 1;
+  // RECEIVER_STATE_STOPPED means the device is present but its owning
+  // service is not producing data (disabled, not started or idle).
+  RECEIVER_STATE_STOPPED = 2;
+  // RECEIVER_STATE_MISSING means no USB device with the claimed serial is
+  // plugged in, or no serial is configured for the role.
+  RECEIVER_STATE_MISSING = 3;
+  // RECEIVER_STATE_ERROR means the role is misconfigured (for example two
+  // roles claim the same serial) or the owning service's output is
+  // unreadable. Receiver.detail says why.
+  RECEIVER_STATE_ERROR = 4;
+}
+
+// ReceiverHardware is the USB device family detected for a receiver.
+enum ReceiverHardware {
+  RECEIVER_HARDWARE_UNSPECIFIED = 0;
+  // RECEIVER_HARDWARE_RTL_SDR is an RTL2832U device (USB 0bda:2832/2838).
+  RECEIVER_HARDWARE_RTL_SDR = 1;
+  // RECEIVER_HARDWARE_AIRSPY is an Airspy R2 / Mini (USB 1d50:60a1).
+  RECEIVER_HARDWARE_AIRSPY = 2;
+}
+
+// Receiver is one claimed or detected receiver.
+message Receiver {
+  // role is the job the receiver is claimed for.
+  ReceiverRole role = 1;
+  // serial is the claimed USB serial (or the detected one for an unassigned
+  // receiver). Empty when the role has no serial configured.
+  string serial = 2;
+  // hardware is the detected device family; unspecified when missing.
+  ReceiverHardware hardware = 3;
+  // present is true when a USB device with this serial is plugged in.
+  bool present = 4;
+  // owner is the service that opens the device: "dump1090", "dump978-fa"
+  // or "openmanetd". Empty for an unassigned receiver.
+  string owner = 5;
+  // state is the receiver's run state.
+  ReceiverState state = 6;
+  // last_sample_time is when the owning service last produced data for this
+  // receiver (aircraft.json update, control-channel decode). Unset when it
+  // never has.
+  google.protobuf.Timestamp last_sample_time = 7;
+  // detail is a short human-readable reason for the state, empty when
+  // running normally.
+  string detail = 8;
+}
+
+// PositionSource says where the reference position used for site
+// selection came from.
+enum PositionSource {
+  POSITION_SOURCE_UNSPECIFIED = 0;
+  // POSITION_SOURCE_NONE means no position is known.
+  POSITION_SOURCE_NONE = 1;
+  // POSITION_SOURCE_GPSD is a live fix from gpsd (or an EUD position gpsd
+  // adopted).
+  POSITION_SOURCE_GPSD = 2;
+  // POSITION_SOURCE_LAST_KNOWN is the last gpsd fix, now older than the
+  // position stale timeout.
+  POSITION_SOURCE_LAST_KNOWN = 3;
+  // POSITION_SOURCE_MANUAL is the location of the manually selected site.
+  POSITION_SOURCE_MANUAL = 4;
+}
+
+// Position is the reference position for site selection.
+message Position {
+  // source says where the position came from.
+  PositionSource source = 1;
+  // latitude in decimal degrees (WGS84). Zero when source is NONE.
+  double latitude = 2;
+  // longitude in decimal degrees (WGS84). Zero when source is NONE.
+  double longitude = 3;
+  // fix_time is when the position was measured. Unset when source is NONE.
+  google.protobuf.Timestamp fix_time = 4;
+  // stale is true when the position is older than the position stale
+  // timeout (or no position is known).
+  bool stale = 5;
+}
+
+// SiteEncryption summarises how much of a site's traffic is encrypted.
+enum SiteEncryption {
+  SITE_ENCRYPTION_UNSPECIFIED = 0;
+  // SITE_ENCRYPTION_NONE means no talkgroups are known to be encrypted.
+  SITE_ENCRYPTION_NONE = 1;
+  // SITE_ENCRYPTION_PARTIAL means some talkgroups are encrypted.
+  SITE_ENCRYPTION_PARTIAL = 2;
+  // SITE_ENCRYPTION_FULL means all voice traffic is encrypted; only
+  // control-channel metadata is receivable.
+  SITE_ENCRYPTION_FULL = 3;
+}
+
+// SiteBand is the frequency band of a site's channels.
+enum SiteBand {
+  SITE_BAND_UNSPECIFIED = 0;
+  // SITE_BAND_VHF is 136-174 MHz.
+  SITE_BAND_VHF = 1;
+  // SITE_BAND_700 is 764-776 MHz.
+  SITE_BAND_700 = 2;
+  // SITE_BAND_800 is 851-869 MHz.
+  SITE_BAND_800 = 3;
+  // SITE_BAND_MIXED means the site uses channels in more than one band.
+  SITE_BAND_MIXED = 4;
+}
+
+// P25Phase is the P25 air interface of a site's voice channels.
+enum P25Phase {
+  P25_PHASE_UNSPECIFIED = 0;
+  // P25_PHASE_1 is FDMA (C4FM) voice.
+  P25_PHASE_1 = 1;
+  // P25_PHASE_2 is TDMA voice on an FDMA control channel.
+  P25_PHASE_2 = 2;
+}
+
+// Site is one P25 trunked radio site from the embedded regional table.
+message Site {
+  // key identifies the site in the embedded table, e.g. "UT-3f2a91c0". It
+  // is stable while the state, system and site names stay the same.
+  string key = 1;
+  // state is the two-letter US state code.
+  string state = 2;
+  // system is the trunked system name.
+  string system = 3;
+  // name is the site name, usually with its RFSS-site number.
+  string name = 4;
+  // county is the county the site serves.
+  string county = 5;
+  // latitude is an estimate from the site's town or peak name, good to
+  // about 15 km.
+  double latitude = 6;
+  // longitude is an estimate, good to about 15 km.
+  double longitude = 7;
+  // distance_km is the great-circle distance from the reference position;
+  // zero when no reference position is known.
+  double distance_km = 8;
+  // control_channel_hz lists the control-channel frequencies (primary and
+  // alternates; the table does not say which is primary).
+  repeated uint64 control_channel_hz = 9;
+  // voice_channel_hz lists the voice/traffic frequencies.
+  repeated uint64 voice_channel_hz = 10;
+  // band is the frequency band.
+  SiteBand band = 11;
+  // phase is the voice air interface.
+  P25Phase phase = 12;
+  // phase_detail is the source's phase note verbatim, e.g. "P25 Phase I
+  // (RR); Phase II TDMA on some talkgroups".
+  string phase_detail = 13;
+  // encryption summarises encrypted traffic.
+  SiteEncryption encryption = 14;
+  // span_hz is highest minus lowest site frequency.
+  uint64 span_hz = 15;
+  // rtl_sdr_needed is how many 2.0 MHz RTL-SDRs cover every site frequency.
+  uint32 rtl_sdr_needed = 16;
+  // wide_tuners_needed is how many 8 MHz wide tuners cover every site
+  // frequency.
+  uint32 wide_tuners_needed = 17;
+  // rtl_sdr_fits is true when one RTL-SDR covers every site frequency.
+  bool rtl_sdr_fits = 18;
+}
+
+// SiteSelectionMode chooses how the monitored site is picked.
+enum SiteSelectionMode {
+  SITE_SELECTION_MODE_UNSPECIFIED = 0;
+  // SITE_SELECTION_MODE_AUTO follows the nearest site to the GPS fix.
+  SITE_SELECTION_MODE_AUTO = 1;
+  // SITE_SELECTION_MODE_MANUAL pins ScannerConfig.manual_site_key.
+  SITE_SELECTION_MODE_MANUAL = 2;
+}
+
+// SiteSelectionReason says why the selected site was chosen.
+enum SiteSelectionReason {
+  SITE_SELECTION_REASON_UNSPECIFIED = 0;
+  // SITE_SELECTION_REASON_NEAREST is the nearest site to a fresh fix.
+  SITE_SELECTION_REASON_NEAREST = 1;
+  // SITE_SELECTION_REASON_HYSTERESIS kept the previous site: a nearer site
+  // exists but is not nearer by more than the hysteresis distance.
+  SITE_SELECTION_REASON_HYSTERESIS = 2;
+  // SITE_SELECTION_REASON_LAST_KNOWN kept the previous site because the fix
+  // is stale or lost.
+  SITE_SELECTION_REASON_LAST_KNOWN = 3;
+  // SITE_SELECTION_REASON_MANUAL is the manually pinned site.
+  SITE_SELECTION_REASON_MANUAL = 4;
+  // SITE_SELECTION_REASON_STALE_FIX picked the nearest site to a stale fix
+  // because no site had been selected yet.
+  SITE_SELECTION_REASON_STALE_FIX = 5;
+}
+
+// TunerPlan is where the wide tuner is centred for the selected site.
+message TunerPlan {
+  // center_hz is the tuner centre frequency.
+  uint64 center_hz = 1;
+  // usable_bandwidth_hz is the configured usable bandwidth of the tuner.
+  uint64 usable_bandwidth_hz = 2;
+  // fits is true when every control and voice frequency lies inside the
+  // usable bandwidth.
+  bool fits = 3;
+  // covered_hz lists the site frequencies inside the usable bandwidth.
+  repeated uint64 covered_hz = 4;
+  // uncovered_hz lists the site frequencies the window misses.
+  repeated uint64 uncovered_hz = 5;
+}
+
+// SelectedSite is the site the wide tuner follows.
+message SelectedSite {
+  // site is the selected site; distance_km is from the reference position.
+  Site site = 1;
+  // mode is the selection mode in force.
+  SiteSelectionMode mode = 2;
+  // reason says why this site was chosen.
+  SiteSelectionReason reason = 3;
+  // control_channel_hz is the control channel being hunted or decoded.
+  uint64 control_channel_hz = 4;
+  // wide_tuner is the wide tuner plan for this site.
+  TunerPlan wide_tuner = 5;
+  // selected_at is when this site became the selection.
+  google.protobuf.Timestamp selected_at = 6;
+}
+
+// ControlChannelState is the P25 control-channel decoder state.
+enum ControlChannelState {
+  CONTROL_CHANNEL_STATE_UNSPECIFIED = 0;
+  // CONTROL_CHANNEL_STATE_UNAVAILABLE means no control-channel decoder is
+  // wired on this node.
+  CONTROL_CHANNEL_STATE_UNAVAILABLE = 1;
+  // CONTROL_CHANNEL_STATE_IDLE means no site is selected, so nothing is
+  // tuned.
+  CONTROL_CHANNEL_STATE_IDLE = 2;
+  // CONTROL_CHANNEL_STATE_HUNTING means the decoder is tuned but has not
+  // reached frame sync.
+  CONTROL_CHANNEL_STATE_HUNTING = 3;
+  // CONTROL_CHANNEL_STATE_LOCKED means the decoder holds frame sync.
+  CONTROL_CHANNEL_STATE_LOCKED = 4;
+  // CONTROL_CHANNEL_STATE_ERROR means tuning failed.
+  CONTROL_CHANNEL_STATE_ERROR = 5;
+}
+
+// ControlChannelStatus is the decoder state and the site identity it
+// decoded.
+message ControlChannelStatus {
+  // state is the decoder state.
+  ControlChannelState state = 1;
+  // frequency_hz is the tuned control channel; zero when idle.
+  uint64 frequency_hz = 2;
+  // last_decode_time is when the decoder last emitted a message.
+  google.protobuf.Timestamp last_decode_time = 3;
+  // stale is true when no message was decoded within the decode stale
+  // timeout while tuned.
+  bool stale = 4;
+  // wacn is the decoded Wide Area Communications Network ID (20 bits).
+  uint32 wacn = 5;
+  // system_id is the decoded P25 system ID (12 bits).
+  uint32 system_id = 6;
+  // rfss is the decoded RF subsystem ID.
+  uint32 rfss = 7;
+  // site_id is the decoded site ID.
+  uint32 site_id = 8;
+  // nac is the decoded Network Access Code (12 bits).
+  uint32 nac = 9;
+  // detail explains an error state.
+  string detail = 10;
+}
+
+// AircraftSource says which receiver heard an aircraft.
+enum AircraftSource {
+  AIRCRAFT_SOURCE_UNSPECIFIED = 0;
+  // AIRCRAFT_SOURCE_ADSB_1090 is 1090 MHz only (dump1090).
+  AIRCRAFT_SOURCE_ADSB_1090 = 1;
+  // AIRCRAFT_SOURCE_UAT_978 is 978 MHz only (skyaware978).
+  AIRCRAFT_SOURCE_UAT_978 = 2;
+  // AIRCRAFT_SOURCE_BOTH means both receivers heard it recently.
+  AIRCRAFT_SOURCE_BOTH = 3;
+}
+
+// Aircraft is one aircraft merged by ICAO address across 1090 and 978.
+message Aircraft {
+  // icao is the 24-bit address as six lowercase hex digits. Non-ICAO
+  // (TIS-B / anonymous) addresses keep the decoder's "~" prefix.
+  string icao = 1;
+  // callsign is the flight ID with padding trimmed; empty when unknown.
+  string callsign = 2;
+  // squawk is the four-digit Mode A code; empty when unknown.
+  string squawk = 3;
+  // latitude in decimal degrees; unset without a position.
+  optional double latitude = 4;
+  // longitude in decimal degrees; unset without a position.
+  optional double longitude = 5;
+  // altitude_ft is barometric altitude (geometric when barometric is
+  // missing) in feet; unset when unknown or on the ground.
+  optional int32 altitude_ft = 6;
+  // on_ground is true when the aircraft reports it is on the ground.
+  bool on_ground = 7;
+  // ground_speed_kt is ground speed in knots.
+  optional double ground_speed_kt = 8;
+  // track_deg is true track over ground, 0-360 degrees.
+  optional double track_deg = 9;
+  // vertical_rate_fpm is the climb (+) or descent (-) rate in feet/minute.
+  optional int32 vertical_rate_fpm = 10;
+  // source says which receivers heard it.
+  AircraftSource source = 11;
+  // last_seen is when any receiver last heard the aircraft.
+  google.protobuf.Timestamp last_seen = 12;
+  // seen_seconds is seconds since last_seen at response time.
+  double seen_seconds = 13;
+  // rssi_dbfs is the strongest recent signal level in dBFS.
+  optional double rssi_dbfs = 14;
+  // stale is true when not heard within the aircraft stale timeout.
+  bool stale = 15;
+}
+
+// AircraftFeed is the health of one aircraft.json producer.
+message AircraftFeed {
+  // source is the receiver the feed belongs to.
+  AircraftSource source = 1;
+  // path is the aircraft.json path polled.
+  string path = 2;
+  // last_update is the producer's own timestamp ("now") of the last file
+  // read; unset when never read.
+  google.protobuf.Timestamp last_update = 3;
+  // aircraft is how many aircraft the last read listed.
+  uint32 aircraft = 4;
+  // stale is true when the file is missing or older than the aircraft
+  // stale timeout.
+  bool stale = 5;
+  // error is the last read or parse error; empty when the last read
+  // succeeded.
+  string error = 6;
+}
+
+// VoiceGrant is one talkgroup's recent voice activity, merged across
+// repeated grants of the same call.
+message VoiceGrant {
+  // talkgroup is the P25 talkgroup ID (16 bits).
+  uint32 talkgroup = 1;
+  // source_unit is the radio ID of the talker (24 bits); zero when the
+  // grant did not carry one.
+  uint32 source_unit = 2;
+  // frequency_hz is the voice channel frequency.
+  uint64 frequency_hz = 3;
+  // channel is the P25 channel number (4-bit identifier + 12-bit channel).
+  uint32 channel = 4;
+  // encrypted is true when the grant's service options mark the call
+  // encrypted. Encrypted audio is never decoded.
+  bool encrypted = 5;
+  // emergency is true when the grant's service options mark an emergency.
+  bool emergency = 6;
+  // start_time is the first grant of the call.
+  google.protobuf.Timestamp start_time = 7;
+  // last_time is the most recent grant or grant update of the call.
+  google.protobuf.Timestamp last_time = 8;
+  // grants is how many grants and updates were merged into this entry.
+  uint32 grants = 9;
+  // site_key is the site whose control channel carried the grant.
+  string site_key = 10;
+}
+
+// ScannerConfig is the persisted scanner configuration.
+message ScannerConfig {
+  option (buf.validate.message).cel = {
+    id: "scanner_config.manual_site"
+    message: "manual_site_key is required in manual mode"
+    expression: "this.mode != 2 || this.manual_site_key != ''"
+  };
+
+  // enabled runs the scanner manager (aircraft polling, receiver checks,
+  // site selection and the control-channel decoder).
+  bool enabled = 1;
+  // mode chooses automatic or manual site selection.
+  SiteSelectionMode mode = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    in: [
+      1,
+      2
+    ]
+  }];
+  // manual_site_key is the Site.key pinned in manual mode.
+  string manual_site_key = 3 [(buf.validate.field).string.max_len = 32];
+  // states restricts site selection to these two-letter states; empty
+  // allows the whole table (UT, ID, WY, CO, AZ, NV, NM).
+  repeated string states = 4 [(buf.validate.field).repeated = {
+    max_items: 7
+    unique: true
+    items: {
+      string: {
+        in: [
+          "UT",
+          "ID",
+          "WY",
+          "CO",
+          "AZ",
+          "NV",
+          "NM"
+        ]
+      }
+    }
+  }];
+  // hysteresis_km is how much nearer a new site must be before the
+  // selection switches, 0-100 km.
+  double hysteresis_km = 5 [(buf.validate.field).double = {
+    gte: 0
+    lte: 100
+  }];
+  // position_stale_after is how old a fix may be before it is stale,
+  // 5 s to 1 h.
+  google.protobuf.Duration position_stale_after = 6 [(buf.validate.field).duration = {
+    gte: {seconds: 5}
+    lte: {seconds: 3600}
+  }];
+  // aircraft_stale_after is how long an aircraft may go unheard before it
+  // is stale, 5 s to 10 min. Stale aircraft are evicted after twice this.
+  google.protobuf.Duration aircraft_stale_after = 7 [(buf.validate.field).duration = {
+    gte: {seconds: 5}
+    lte: {seconds: 600}
+  }];
+  // decode_stale_after is how long the control channel may go without a
+  // decode before it is stale, 1 s to 10 min.
+  google.protobuf.Duration decode_stale_after = 8 [(buf.validate.field).duration = {
+    gte: {seconds: 1}
+    lte: {seconds: 600}
+  }];
+}
+
+// ConventionalMode is the analog demodulation of a conventional channel.
+enum ConventionalMode {
+  CONVENTIONAL_MODE_UNSPECIFIED = 0;
+  // CONVENTIONAL_MODE_NFM is narrowband FM with noise squelch.
+  CONVENTIONAL_MODE_NFM = 1;
+  // CONVENTIONAL_MODE_AM is AM with carrier squelch (the 108-137 MHz
+  // aviation band).
+  CONVENTIONAL_MODE_AM = 2;
+}
+
+// ConventionalCategory is where a conventional channel comes from.
+enum ConventionalCategory {
+  CONVENTIONAL_CATEGORY_UNSPECIFIED = 0;
+  // CONVENTIONAL_CATEGORY_CONVENTIONAL is a state or local land mobile
+  // channel.
+  CONVENTIONAL_CATEGORY_CONVENTIONAL = 1;
+  // CONVENTIONAL_CATEGORY_AVIATION is an airport, ARTCC or national
+  // aviation frequency.
+  CONVENTIONAL_CATEGORY_AVIATION = 2;
+  // CONVENTIONAL_CATEGORY_INTEROP is a national interoperability channel.
+  CONVENTIONAL_CATEGORY_INTEROP = 3;
+  // CONVENTIONAL_CATEGORY_WEATHER is a NOAA Weather Radio transmitter.
+  CONVENTIONAL_CATEGORY_WEATHER = 4;
+}
+
+// ConventionalScanState is the conventional scanner state.
+enum ConventionalScanState {
+  CONVENTIONAL_SCAN_STATE_UNSPECIFIED = 0;
+  // CONVENTIONAL_SCAN_STATE_UNAVAILABLE: no conventional scanner on this
+  // node, or rtl_sdr is not installed.
+  CONVENTIONAL_SCAN_STATE_UNAVAILABLE = 1;
+  // CONVENTIONAL_SCAN_STATE_IDLE: nothing to scan (scanner disabled, no
+  // scan receiver serial, or no channels selected).
+  CONVENTIONAL_SCAN_STATE_IDLE = 2;
+  // CONVENTIONAL_SCAN_STATE_RECEIVER_BUSY: the scan RTL-SDR decodes the
+  // P25 control channel because no wide receiver is configured.
+  CONVENTIONAL_SCAN_STATE_RECEIVER_BUSY = 3;
+  // CONVENTIONAL_SCAN_STATE_SCANNING: stepping through capture windows.
+  CONVENTIONAL_SCAN_STATE_SCANNING = 4;
+  // CONVENTIONAL_SCAN_STATE_HOLDING: a squelch is open (or closed within
+  // the hold time) and the scan stays on its window.
+  CONVENTIONAL_SCAN_STATE_HOLDING = 5;
+  // CONVENTIONAL_SCAN_STATE_ERROR: the capture failed; it is retried.
+  CONVENTIONAL_SCAN_STATE_ERROR = 6;
+}
+
+// ConventionalScanStatus is the conventional scanner's state and the
+// capture in progress.
+message ConventionalScanStatus {
+  // state is the scanner state.
+  ConventionalScanState state = 1;
+  // detail explains an idle, busy, unavailable or error state.
+  string detail = 2;
+  // center_hz is the scan RTL-SDR's current center frequency; 0 when not
+  // capturing.
+  uint64 center_hz = 3;
+  // window is the 1-based capture window being received; 0 when none.
+  uint32 window = 4;
+  // windows is how many capture windows the channel list was packed into.
+  uint32 windows = 5;
+  // sample_rate is the capture rate in samples per second.
+  uint32 sample_rate = 6;
+}
+
+// ConventionalChannel is one analog channel on the conventional scan
+// list with its live state.
+message ConventionalChannel {
+  // key identifies the channel (StreamAudioRequest.channel_key).
+  string key = 1;
+  // label is the channel name and use from the frequency research.
+  string label = 2;
+  // frequency_hz is the receive frequency.
+  uint64 frequency_hz = 3;
+  // mode is the demodulation used.
+  ConventionalMode mode = 4;
+  // category is the channel's source category.
+  ConventionalCategory category = 5;
+  // state is the two-letter state, or "US" for nationwide channels.
+  string state = 6;
+  // latitude and longitude are set for channels with a location (airport,
+  // ARTCC site, weather transmitter).
+  optional double latitude = 7;
+  // longitude of the channel's location.
+  optional double longitude = 8;
+  // distance_km from the reference position; unset for channels without
+  // a location.
+  optional double distance_km = 9;
+  // always_on is true for nationwide channels, which are scanned wherever
+  // the node is.
+  bool always_on = 10;
+  // window is the 1-based capture window holding the channel; 0 when it
+  // fits no window and is listed but not scanned.
+  uint32 window = 11;
+  // active is true while the channel's squelch is open.
+  bool active = 12;
+  // last_heard_time is when the squelch was last open; unset when never.
+  google.protobuf.Timestamp last_heard_time = 13;
+  // level is the last squelch metric: for NFM the noise RMS relative to
+  // peak deviation (lower is a stronger signal), for AM the carrier level
+  // in dBFS.
+  double level = 14;
+}
+
+// AudioEncoding is the payload format of StreamAudioResponse.data.
+enum AudioEncoding {
+  AUDIO_ENCODING_UNSPECIFIED = 0;
+  // AUDIO_ENCODING_PCM_S16LE is 8 kHz mono signed 16-bit little-endian
+  // PCM, 160 samples (320 bytes, 20 ms) per message.
+  AUDIO_ENCODING_PCM_S16LE = 1;
+  // AUDIO_ENCODING_OPUS is one 20 ms 8 kHz mono Opus packet per message,
+  // as CommsService.StreamAudioRx carries mesh audio.
+  AUDIO_ENCODING_OPUS = 2;
+}
