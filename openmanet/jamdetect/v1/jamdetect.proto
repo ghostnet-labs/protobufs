@@ -1,0 +1,121 @@
+syntax = "proto3";
+
+package openmanet.jamdetect.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// JamState is a radio's detection state. A radio walks
+// WARMING_UP -> CLEAR -> SUSPECTED -> JAMMED and back to CLEAR once its
+// channel reads normal again.
+enum JamState {
+  JAM_STATE_UNSPECIFIED = 0;
+  // WARMING_UP: the detector is still learning the channel's normal
+  // noise floor and busy time.
+  JAM_STATE_WARMING_UP = 1;
+  // CLEAR: the channel reads normal.
+  JAM_STATE_CLEAR = 2;
+  // SUSPECTED: the channel has read abnormal for a short run of samples.
+  JAM_STATE_SUSPECTED = 3;
+  // JAMMED: the channel has read abnormal long enough to raise an alert.
+  JAM_STATE_JAMMED = 4;
+}
+
+// RadioBand is the band a monitored radio operates in.
+enum RadioBand {
+  RADIO_BAND_UNSPECIFIED = 0;
+  // RADIO_BAND_S1G: 802.11ah HaLow, 902-928 MHz in the US.
+  RADIO_BAND_S1G = 1;
+  RADIO_BAND_2G4 = 2;
+  RADIO_BAND_5G = 3;
+  RADIO_BAND_6G = 4;
+}
+
+// JamReason names the reading that made a sample abnormal.
+enum JamReason {
+  JAM_REASON_UNSPECIFIED = 0;
+  // JAM_REASON_NOISE_RISE: the noise floor rose well above its baseline.
+  JAM_REASON_NOISE_RISE = 1;
+  // JAM_REASON_NOISE_HIGH: the noise floor is above the absolute ceiling.
+  JAM_REASON_NOISE_HIGH = 2;
+  // JAM_REASON_BUSY_RISE: busy time the radio cannot explain by frames it
+  // sent or received rose well above its baseline.
+  JAM_REASON_BUSY_RISE = 3;
+  // JAM_REASON_BUSY_HIGH: unexplained busy time is above the absolute
+  // ceiling.
+  JAM_REASON_BUSY_HIGH = 4;
+}
+
+// RadioJamStatus is one radio's latest channel reading and detection state.
+message RadioJamStatus {
+  // radio is the interface the survey was read from (e.g. "phy1-mesh0").
+  string radio = 1;
+  // phy is the wiphy (e.g. "phy1").
+  string phy = 2;
+  RadioBand band = 3;
+  // freq_mhz is the in-use channel's center frequency as the driver
+  // reports it. Morse HaLow drivers may report a mapped 5 GHz value.
+  double freq_mhz = 4;
+  JamState state = 5;
+  // noise_known is false when the driver did not report a noise floor.
+  bool noise_known = 6;
+  // noise_dbm is the latest noise floor in dBm.
+  int32 noise_dbm = 7;
+  // baseline_noise_dbm is the learned normal noise floor in dBm.
+  double baseline_noise_dbm = 8;
+  // busy_pct is channel busy time over the last sample, 0-100.
+  double busy_pct = 9;
+  // unexplained_busy_pct is busy time not accounted for by this radio's
+  // own receive and transmit time over the last sample, 0-100. Energy the
+  // radio cannot decode (a jammer) shows up here; a busy but healthy
+  // channel does not.
+  double unexplained_busy_pct = 10;
+  // baseline_unexplained_busy_pct is the learned normal unexplained busy
+  // time, 0-100.
+  double baseline_unexplained_busy_pct = 11;
+  // reasons lists why the latest sample read abnormal; empty when normal.
+  repeated JamReason reasons = 12;
+  // updated_at is when the latest sample was taken.
+  google.protobuf.Timestamp updated_at = 13;
+}
+
+// JamEvent is one jamming episode on one radio of one node.
+message JamEvent {
+  // id is stable for the whole episode: "<radio>-<start unix seconds>".
+  string id = 1;
+  // state is SUSPECTED, JAMMED or CLEAR (episode over).
+  JamState state = 2;
+  // radio is the radio's reading when the event was raised.
+  RadioJamStatus radio = 3;
+  google.protobuf.Timestamp started_at = 4;
+  google.protobuf.Timestamp updated_at = 5;
+  // cleared_at is set once the episode is over.
+  google.protobuf.Timestamp cleared_at = 6;
+  // peak_noise_dbm is the highest noise floor seen in the episode.
+  int32 peak_noise_dbm = 7;
+  // peak_unexplained_busy_pct is the highest unexplained busy time seen in
+  // the episode, 0-100.
+  double peak_unexplained_busy_pct = 8;
+}
+
+// JamPosition is the reporting node's GNSS fix. A jammer is located near
+// the node that hears it.
+message JamPosition {
+  double latitude = 1;
+  double longitude = 2;
+  double altitude_m = 3;
+}
+
+// JamReport is one node's detection state. Every node publishes its own
+// report to the mesh over alfred (DATA_TYPE_JAM_REPORT) so any node can
+// show the whole mesh's detections.
+message JamReport {
+  // primary_mac is the publishing node's batman interface MAC, lowercase.
+  string primary_mac = 1;
+  string hostname = 2;
+  google.protobuf.Timestamp collected_at = 3;
+  repeated RadioJamStatus radios = 4;
+  // active_events holds the node's open (SUSPECTED or JAMMED) episodes.
+  repeated JamEvent active_events = 5;
+  // position is unset when the node has no GNSS fix.
+  JamPosition position = 6;
+}

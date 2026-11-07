@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+package openmanet.jamdetect.v1;
+
+import "openmanet/jamdetect/v1/jamdetect.proto";
+
+// JamDetectService reports jamming detection. Every node reads its own
+// radios' channel surveys (noise floor and busy time), learns what normal
+// looks like, and flags sudden jumps. The service also returns the
+// reports other nodes publish over the mesh.
+//
+// With detection disabled (jamdetect.enable false) every RPC succeeds with
+// enabled false and empty data.
+//
+// Every RPC requires a session (the auth middleware does not exempt them).
+service JamDetectService {
+  // GetJamStatus returns this node's radios and open episodes, the latest
+  // report from every other node, and recent episodes on this node.
+  rpc GetJamStatus(GetJamStatusRequest) returns (GetJamStatusResponse);
+
+  // StreamJamEvents sends this node's episode changes (SUSPECTED, JAMMED,
+  // CLEAR) as they happen until the client cancels. The first message
+  // carries every open episode so clients start with the current state.
+  // RESOURCE_EXHAUSTED when too many streams are open.
+  rpc StreamJamEvents(StreamJamEventsRequest) returns (stream StreamJamEventsResponse);
+}
+
+message GetJamStatusRequest {}
+
+message GetJamStatusResponse {
+  bool enabled = 1;
+  // local is this node's report.
+  JamReport local = 2;
+  // remote holds the latest report from every other node, sorted by
+  // hostname. Reports older than the gossip expiry are dropped.
+  repeated JamReport remote = 3;
+  // recent holds this node's latest episodes, newest first, open and
+  // closed, from a bounded history.
+  repeated JamEvent recent = 4;
+}
+
+message StreamJamEventsRequest {}
+
+message StreamJamEventsResponse {
+  repeated JamEvent events = 1;
+}
