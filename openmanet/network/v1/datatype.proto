@@ -46,4 +46,11 @@ enum DataType {
      Payload: openmanet.jamdetect.v1.JamReport (see jamdetect.proto).
   */
   DATA_TYPE_JAM_REPORT = 105;
+
+  /*
+     Weather data type. A node with a weather sensor wired to it publishes
+     its latest reading every 30 s.
+     Payload: openmanet.weather.v1.WeatherReport (see weather.proto).
+  */
+  DATA_TYPE_WEATHER = 106;
 }

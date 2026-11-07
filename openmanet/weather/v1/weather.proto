@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package openmanet.weather.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// SensorState is the health of the weather sensor wired to a node.
+enum SensorState {
+  SENSOR_STATE_UNSPECIFIED = 0;
+  // SENSOR_STATE_STARTING means no poll has succeeded yet.
+  SENSOR_STATE_STARTING = 1;
+  // SENSOR_STATE_OK means the latest poll succeeded.
+  SENSOR_STATE_OK = 2;
+  // SENSOR_STATE_ERROR means the latest poll failed. The reading keeps the
+  // last good values and its observed_at says how old they are.
+  SENSOR_STATE_ERROR = 3;
+}
+
+// WeatherReading is one set of values from a weather sensor, in SI units.
+// Clients convert for display. A field is unset when the sensor does not
+// measure it or has not reported it yet.
+message WeatherReading {
+  // observed_at is when the sensor last answered a poll.
+  google.protobuf.Timestamp observed_at = 1;
+  optional double temperature_c = 2;
+  optional double humidity_pct = 3;
+  // pressure_hpa is station pressure (not reduced to sea level).
+  optional double pressure_hpa = 4;
+  // pressure_change_3h_hpa is pressure now minus pressure three hours ago.
+  // Unset until the node has three hours of history.
+  optional double pressure_change_3h_hpa = 5;
+  // wind_speed_ms is the latest wind speed.
+  optional double wind_speed_ms = 6;
+  // wind_gust_ms is the highest wind speed polled in the gust window
+  // (weather.gustWindow, default 10 minutes).
+  optional double wind_gust_ms = 7;
+  // wind_direction_deg is where the wind blows from: 0 north, 90 east.
+  optional double wind_direction_deg = 8;
+  // rain_total_mm is rain since the sensor's counter was last zeroed.
+  optional double rain_total_mm = 9;
+  // rain_last_hour_mm is rain over the last hour, from rain_total_mm.
+  optional double rain_last_hour_mm = 10;
+  optional double light_lux = 11;
+}
+
+// WeatherReport is the record a node with a weather sensor publishes to
+// the mesh over alfred (openmanet.network.v1.DATA_TYPE_WEATHER).
+message WeatherReport {
+  // primary_mac is the publisher's batman interface MAC, lowercased.
+  string primary_mac = 1;
+  string hostname = 2;
+  // collected_at is when the publisher built this report.
+  google.protobuf.Timestamp collected_at = 3;
+  // model names the sensor, for example "sen0657".
+  string model = 4;
+  SensorState state = 5;
+  // error is the latest poll error when state is SENSOR_STATE_ERROR.
+  string error = 6;
+  // has_position is true when the publisher had a GNSS fix.
+  bool has_position = 7;
+  double latitude = 8;
+  double longitude = 9;
+  double altitude_m = 10;
+  WeatherReading reading = 11;
+}
