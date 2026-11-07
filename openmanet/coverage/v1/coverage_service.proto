@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package openmanet.coverage.v1;
+
+import "openmanet/coverage/v1/coverage.proto";
+
+// CoverageService serves the mesh coverage map. Every node records how
+// well it hears the mesh at each spot it visits (tak.coverage) and shares
+// its map with the rest of the mesh, so any node can show where the mesh
+// reaches and where it doesn't.
+//
+// With coverage disabled (tak.coverage.enable false) GetCoverageMap
+// succeeds with enabled false and empty data.
+//
+// Every RPC requires a session (the auth middleware does not exempt them).
+service CoverageService {
+  // GetCoverageMap returns this node's map and the latest map from every
+  // other node.
+  rpc GetCoverageMap(GetCoverageMapRequest) returns (GetCoverageMapResponse);
+}
+
+message GetCoverageMapRequest {}
+
+message GetCoverageMapResponse {
+  bool enabled = 1;
+  // local is this node's map.
+  CoverageReport local = 2;
+  // remote holds the latest map from every other node, sorted by
+  // hostname. Maps that stop updating are dropped after the gossip
+  // expiry.
+  repeated CoverageReport remote = 3;
+}

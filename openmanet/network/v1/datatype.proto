@@ -53,4 +53,11 @@ enum DataType {
      Payload: openmanet.weather.v1.WeatherReport (see weather.proto).
   */
   DATA_TYPE_WEATHER = 106;
+
+  /*
+     Coverage map data type. Each node publishes its coverage grid (how
+     well it heard the mesh at each spot it has been) every 5 minutes.
+     Payload: openmanet.coverage.v1.CoverageReport (see coverage.proto).
+  */
+  DATA_TYPE_COVERAGE = 107;
 }
