@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package openmanet.coverage.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// CoverageGrade is how well a node heard the mesh in a cell. It matches
+// the colors the ATAK feed draws.
+enum CoverageGrade {
+  COVERAGE_GRADE_UNSPECIFIED = 0;
+  // GOOD: best signal at or above -70 dBm with no dropouts.
+  COVERAGE_GRADE_GOOD = 1;
+  // FAIR: best signal at or above -82 dBm, or a strong signal with
+  // occasional dropouts.
+  COVERAGE_GRADE_FAIR = 2;
+  // WEAK: a link, but below -82 dBm.
+  COVERAGE_GRADE_WEAK = 3;
+  // NO_LINK: no mesh station heard in at least half the readings.
+  COVERAGE_GRADE_NO_LINK = 4;
+}
+
+// CoverageCell is one grid cell a node has stood in. Cells form a grid
+// of cell_meters squares: row counts latitude bands of cell_meters from
+// the equator, col counts longitude steps of cell_meters (measured at the
+// band's center latitude) from the prime meridian.
+message CoverageCell {
+  int32 row = 1;
+  int32 col = 2;
+  CoverageGrade grade = 3;
+  // signal_dbm is a running average of the best station's signal over
+  // the readings that heard one. Zero when none did.
+  sint32 signal_dbm = 4;
+  // samples is how many readings the cell holds.
+  uint32 samples = 5;
+  // no_link_pct is the share of readings that heard no mesh station.
+  uint32 no_link_pct = 6;
+  // max_links is the most mesh stations heard at once in the cell.
+  uint32 max_links = 7;
+  google.protobuf.Timestamp last_seen = 8;
+}
+
+// CoverageReport is one node's coverage map. Every node publishes its own
+// over alfred (DATA_TYPE_COVERAGE) so any node can show the whole mesh's
+// coverage.
+message CoverageReport {
+  // primary_mac is the publishing node's batman interface MAC, lowercase.
+  string primary_mac = 1;
+  string hostname = 2;
+  google.protobuf.Timestamp collected_at = 3;
+  // cell_meters is the grid cell size the cells are keyed in.
+  uint32 cell_meters = 4;
+  // cells are newest first.
+  repeated CoverageCell cells = 5;
+}
