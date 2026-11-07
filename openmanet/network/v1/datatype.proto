@@ -46,4 +46,11 @@ enum DataType {
      Payload: openmanet.jamdetect.v1.JamReport (see jamdetect.proto).
   */
   DATA_TYPE_JAM_REPORT = 105;
+
+  /*
+     Coverage map data type. Each node publishes its coverage grid (how
+     well it heard the mesh at each spot it has been) every 5 minutes.
+     Payload: openmanet.coverage.v1.CoverageReport (see coverage.proto).
+  */
+  DATA_TYPE_COVERAGE = 106;
 }
