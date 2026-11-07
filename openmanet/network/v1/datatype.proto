@@ -39,4 +39,11 @@ enum DataType {
      Payload: openmanetd internal/chanmig/platform bundle, record version 1.
   */
   DATA_TYPE_CHANNEL_MIGRATION = 104;
+
+  /*
+     Jamming detection data type. Each node publishes its latest channel
+     readings and open jamming episodes every 10 s.
+     Payload: openmanet.jamdetect.v1.JamReport (see jamdetect.proto).
+  */
+  DATA_TYPE_JAM_REPORT = 105;
 }
