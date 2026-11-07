@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package openmanet.weather.v1;
+
+import "openmanet/weather/v1/weather.proto";
+
+// WeatherService reports weather stations on the mesh. A node with a
+// weather sensor wired to it (weather.sensor.enable) polls it and shares
+// the readings with every node; every node lists every station it hears.
+//
+// Every RPC requires a session (the auth middleware does not exempt them).
+service WeatherService {
+  // ListWeatherStations returns this node's station (when it has one)
+  // followed by every station heard over the mesh, sorted by hostname.
+  rpc ListWeatherStations(ListWeatherStationsRequest) returns (ListWeatherStationsResponse);
+}
+
+message ListWeatherStationsRequest {}
+
+// WeatherStation is one station as this node sees it.
+message WeatherStation {
+  WeatherReport report = 1;
+  // local is true for the sensor wired to this node.
+  bool local = 2;
+  // stale is true when the reading is older than weather.staleAfter
+  // (default 5 minutes), so clients grey it out instead of showing old
+  // weather as current.
+  bool stale = 3;
+  // age_seconds is how old the reading is, measured on this node's clock.
+  // -1 when the station has never produced a reading.
+  int32 age_seconds = 4;
+}
+
+message ListWeatherStationsResponse {
+  // sensor_enabled is true when this node has a weather sensor configured.
+  bool sensor_enabled = 1;
+  repeated WeatherStation stations = 2;
+}
