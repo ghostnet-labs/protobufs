@@ -17,7 +17,7 @@ jobs:
     # Same-repo PRs run on the ephemeral ARC runners without BUF_TOKEN; pushes,
     # branch deletes and fork PRs stay on hosted runners, so the registry
     # token never reaches the self-hosted machine.
-    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && 'ghostnet-linux-arm64' || 'ubuntu-latest' }}
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && 'ghostnet-linux-arm64' || 'ubuntu-24.04' }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
